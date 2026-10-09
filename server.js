@@ -6,6 +6,7 @@ const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
 const db = require('./db');
+const google = require('./google-auth');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -60,6 +61,7 @@ app.post('/api/signup', h(async (req, res) => {
 app.post('/api/login', h(async (req, res) => {
   const { username = '', password = '' } = req.body || {};
   const u = await findUser(String(username).replace(/^@/, ''));
+  if (u && !u.password_hash) return res.status(401).json({ error: 'This account uses Google sign-in. Use “Continue with Google”.' });
   if (!u || !bcrypt.compareSync(String(password), u.password_hash)) return res.status(401).json({ error: 'Wrong username or password' });
   await startSession(res, u.id);
   res.json({ user: publicUser(u) });
@@ -72,6 +74,63 @@ app.get('/api/me', h(async (req, res) => {
   if (!req.user) return res.json({ user: null });
   const { c } = await db.get('SELECT COUNT(*)::int c FROM notifications WHERE user_id=$1 AND NOT read', [req.user.id]);
   res.json({ user: publicUser(req.user), unread: c });
+}));
+
+// ---------- Continue with Google (OAuth 2.0 authorization code flow) ----------
+app.get('/api/config', (req, res) => res.json({ google: google.enabled() }));
+
+const G_COOKIE = 'g_oauth';
+const gCookieOpts = (req) => ({ httpOnly: true, sameSite: 'lax', secure: google.redirectUri(req).startsWith('https:'), path: '/auth/google' });
+app.get('/auth/google', (req, res) => {
+  if (!google.enabled()) return res.redirect('/login?error=google');
+  const state = crypto.randomBytes(24).toString('hex'), nonce = crypto.randomBytes(16).toString('hex');
+  res.cookie(G_COOKIE, state + '.' + nonce, { ...gCookieOpts(req), maxAge: 10 * 60e3 });
+  res.redirect(google.authUrl({ clientId: google.config().clientId, redirectUri: google.redirectUri(req), state, nonce }));
+});
+
+// Find the user for this Google account: by google_id, else link by verified email, else create one.
+async function userForGoogle(g) {
+  let u = await db.get('SELECT * FROM users WHERE google_id=$1', [g.sub]);
+  if (u) {
+    if (!u.email) await db.run('UPDATE users SET email=$1 WHERE id=$2', [g.email, u.id]);
+    return u;
+  }
+  const avatar = google.avatarUrl(g.picture);
+  u = await db.get('SELECT * FROM users WHERE lower(email)=lower($1) AND google_id IS NULL ORDER BY id LIMIT 1', [g.email]);
+  if (u) {
+    return db.get('UPDATE users SET google_id=$1, avatar=COALESCE(avatar,$2) WHERE id=$3 RETURNING *', [g.sub, avatar, u.id]);
+  }
+  const base = google.usernameBase(g.email, g.name);
+  for (let attempt = 0; ; attempt++) {
+    const username = await google.uniqueUsername(base, async (n) => !!(await findUser(n)));
+    try {
+      return await db.get(`INSERT INTO users(username,name,password_hash,email,google_id,avatar,created_at)
+        VALUES ($1,$2,NULL,$3,$4,$5,$6) RETURNING *`,
+        [username, (String(g.name || '').trim() || username).slice(0, 50), g.email, g.sub, avatar, now()]);
+    } catch (e) {
+      if (e.code !== '23505' || attempt >= 3) throw e;
+      const again = await db.get('SELECT * FROM users WHERE google_id=$1', [g.sub]); // concurrent callback won
+      if (again) return again;
+    }
+  }
+}
+
+app.get('/auth/google/callback', h(async (req, res) => {
+  const fail = (why) => { console.warn('Google sign-in failed:', why); res.redirect('/login?error=google'); };
+  const [state, nonce] = String(req.cookies[G_COOKIE] || '').split('.');
+  res.clearCookie(G_COOKIE, gCookieOpts(req));
+  if (!google.enabled()) return fail('not configured');
+  if (req.query.error) return fail('google returned ' + req.query.error);
+  if (!state || !google.safeEqual(state, req.query.state)) return fail('state mismatch');
+  if (!req.query.code) return fail('missing code');
+  let profile;
+  try {
+    profile = await google.fetchProfile({ code: String(req.query.code), redirectUri: google.redirectUri(req), nonce });
+  } catch (e) { return fail(e.message); }
+  const u = await userForGoogle(profile);
+  if (req.cookies.sid) await db.run('DELETE FROM sessions WHERE token=$1', [req.cookies.sid]);
+  await startSession(res, u.id);
+  res.redirect('/home');
 }));
 
 // ---------- uploads (stored in Postgres, served from /media/:id) ----------

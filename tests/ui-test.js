@@ -30,6 +30,9 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   if (!(await page.textContent('.auth')).includes('ZuZu')) throw new Error('login page lacks ZuZu wordmark');
   if (/x ?clone/i.test(await page.content())) throw new Error('old X clone branding still on login page');
   step('login page shows ZuZu branding');
+  const cfg = await (await fetch(BASE + '/api/config')).json();
+  if (!cfg.google && await page.$('[data-google]')) throw new Error('Google button shown although Google sign-in is not configured');
+  step('Google button ' + (cfg.google ? 'configured' : 'hidden (GOOGLE_CLIENT_ID not set)'));
   if (shots) await page.screenshot({ path: OUT + '/1-login.png' });
   step('login page');
 
@@ -150,7 +153,65 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     await mp.screenshot({ path: OUT + '/5-mobile-profile.png' });
     step('screenshots saved');
   }
+  await googleUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
   await browser.close();
   process.exit(errors.length ? 1 : 0);
 })().catch(e => { console.error('FAILED:', e.message); process.exit(1); });
+
+// Continue with Google against a local instance configured with a mock Google token endpoint.
+async function googleUi(browser, errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping Google UI: needs a local server)');
+  const { startMockGoogle, startGoogleApp, codeFor } = require('./google-server');
+  const cid = 'ui-client.apps.googleusercontent.com', secret = 'ui-secret', PORT = 4189, GB = `http://localhost:${PORT}`;
+  const mock = await startMockGoogle(cid, secret);
+  const app = await startGoogleApp({ port: PORT, clientId: cid, clientSecret: secret, tokenUrl: mock.url, publicUrl: GB });
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  try {
+    const page = await ctx.newPage();
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    await page.goto(GB + '/login');
+    await page.waitForSelector('a.btn-google[href="/auth/google"]:has-text("Continue with Google")');
+    const order = await page.evaluate(() => { const g = document.querySelector('.btn-google'), o = document.querySelector('.auth .or'), f = document.querySelector('form[data-form=auth]'); return !!(g.compareDocumentPosition(o) & 4) && !!(o.compareDocumentPosition(f) & 4); });
+    if (!order) throw new Error('Google button / "or" divider not above the form');
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: OUT + '/7-google-login.png' });
+    step('login page shows Continue with Google above "or" (screenshot 7-google-login.png)');
+    await page.click('text=Sign up');
+    await page.waitForSelector('form[data-mode=signup]'); await page.waitForSelector('a.btn-google[href="/auth/google"]');
+    step('sign-up page shows Google button');
+    await page.goto(GB + '/login?error=google');
+    await page.waitForSelector('.auth .err:has-text("Couldn’t sign in with Google")');
+    if (new URL(page.url()).search) throw new Error('error param not cleaned from URL');
+    step('/login?error=google shows a friendly message');
+
+    // Full flow: "Google" (intercepted) bounces straight back with a mock code for the same state.
+    const rnd = Math.floor(Math.random() * 1e6);
+    const picture = `https://lh3.googleusercontent.com/a/ui-test-${rnd}=s96-c`;
+    // Chromium doesn't hand server-side redirects to page.route, so wrap /auth/google itself:
+    // let the app answer (state cookie + redirect to Google), then point that redirect at the callback.
+    await page.route(GB + '/auth/google', async (route) => {
+      const resp = await route.fetch({ maxRedirects: 0 });
+      const u = new URL(resp.headers()['location']);
+      if (u.origin !== 'https://accounts.google.com') throw new Error('not redirected to Google: ' + u);
+      const code = codeFor({ sub: 'ui' + rnd, email: `ui.google${rnd}@gmail.com`, name: 'UI Googler', picture });
+      await route.fulfill({ status: 302, headers: { ...resp.headers(), location: `${u.searchParams.get('redirect_uri')}?code=${code}&state=${u.searchParams.get('state')}` } });
+    });
+    await page.route('https://lh3.googleusercontent.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: makePng(96, 96, [66, 133, 244]) }));
+    await page.goto(GB + '/login');
+    await page.click('a.btn-google');
+    try { await page.waitForURL('**/home', { timeout: 10000 }); } catch (e) { throw new Error('Google flow did not reach /home; at ' + page.url() + '\n' + app.log()); }
+    const sel = `.nav .me-chip img.avatar[src^="https://lh3.googleusercontent.com/"]`;
+    await page.waitForSelector(sel);
+    if (await page.getAttribute(sel, 'referrerpolicy') !== 'no-referrer') throw new Error('external avatar lacks referrerpolicy=no-referrer');
+    await imgLoaded(page, sel);
+    if (!(await page.textContent('.me-chip')).includes('@ui.google' + rnd)) throw new Error('unexpected username after Google sign-in');
+    step('Continue with Google signs in a new user (@ui.google' + rnd + ') and shows the Google avatar');
+    await page.goto(GB + '/u/ui.google' + rnd);
+    try { await imgLoaded(page, '.pf img.avatar[src^="https://"]'); } catch (e) { throw new Error('profile avatar: ' + page.url() + ' ' + await page.evaluate(() => (document.querySelector('#profile') || document.body).innerHTML.slice(0, 600))); }
+    step('external avatar renders on profile');
+  } finally {
+    await ctx.close(); app.child.kill(); mock.srv.close();
+  }
+}

@@ -20,6 +20,21 @@ Uploaded images (post images, avatars, banners; max 5 MB) are stored in the `med
 Set `DATABASE_URL` (Neon connection string) in the service's Environment settings.
 Build: `npm install`, start: `npm start` (= `node server.js`), health check: `/healthz`.
 
+## Continue with Google (optional)
+Server-side OAuth 2.0 authorization-code flow (`google-auth.js`, plain fetch). The button on the
+login/sign-up pages only shows when both of these are set (`GET /api/config` -> `{"google": true}`):
+
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — OAuth client (type "Web application") from Google Cloud
+- `PUBLIC_URL` — e.g. `https://zuzu-app.onrender.com`; redirect URI is `${PUBLIC_URL}/auth/google/callback`.
+  If unset it is derived from the request (honours `x-forwarded-proto`/`x-forwarded-host`).
+
+Flow: `GET /auth/google` (state + nonce in a 10-minute httpOnly cookie, `prompt=select_account`) ->
+Google -> `GET /auth/google/callback` (state check, code exchange, id_token claims checked: aud, iss,
+exp, email_verified) -> user found by `google_id`, else linked by matching `email`, else created
+(username from the email local part, numeric suffix if taken; Google photo URL as avatar) -> `/home`.
+Failures redirect to `/login?error=google`. Google-only users have no password (`password_hash` NULL),
+so password login tells them to use Google. `GOOGLE_TOKEN_URL` is only for tests (mock token endpoint).
+
 ## Local commands
     cd /workspace/xclone
     ./start.sh app        # (re)start the app in the background (logs: server.log)
@@ -27,7 +42,7 @@ Build: `npm install`, start: `npm start` (= `node server.js`), health check: `/h
     ./start.sh tunnel     # (re)start Cloudflare quick tunnel (logs: tunnel.log, URL in PUBLIC_URL.txt)
     ./start.sh            # both
     node seed.js          # create tables + seed demo data if the DB is empty (needs DATABASE_URL)
-    node tests/api-test.js    # API checks
+    node tests/api-test.js    # API checks (+ Google flow against a mock token endpoint on :4189)
     node tests/ui-test.js     # headless Chrome end-to-end flow
     node tests/shots.js       # regenerate screenshots/ (read-only, logs in as demo)
 

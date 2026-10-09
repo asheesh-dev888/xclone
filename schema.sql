@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS users(
   banner TEXT,
   created_at BIGINT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower ON users(lower(username));
+-- Continue with Google: Google-only accounts have no password.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_id ON users(google_id);
+CREATE INDEX IF NOT EXISTS users_email_lower ON users(lower(email));
 
 CREATE TABLE IF NOT EXISTS sessions(
   token TEXT PRIMARY KEY,

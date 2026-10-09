@@ -35,7 +35,7 @@ const P = {
 const ic = (name, cls = 'icon') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true"><path d="${P[name]}"/></svg>`;
 
 // ---------- state & api ----------
-const state = { me: null, unread: 0, homeTab: localStorage.getItem('homeTab') || 'following' };
+const state = { me: null, unread: 0, homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false } };
 async function api(method, url, body) {
   const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body instanceof FormData) opts.body = body;
@@ -54,7 +54,8 @@ function toast(msg) {
 // ---------- helpers ----------
 const COLORS = ['#1d9bf0', '#f91880', '#00ba7c', '#7856ff', '#ff7a00', '#e0245e', '#17bf63', '#794bc4'];
 function avatar(u, cls = '') {
-  if (u.avatar) return `<img class="avatar ${cls}" src="${esc(u.avatar)}" alt="">`;
+  // Avatars are /media/:id uploads or external https URLs (Google profile photos need no-referrer).
+  if (u.avatar) return `<img class="avatar ${cls}" src="${esc(u.avatar)}" alt="" referrerpolicy="no-referrer">`;
   const name = u.name || u.username || '?';
   const color = COLORS[[...(u.username || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
   return `<div class="avatar ${cls}" style="background:${color}">${esc([...name][0].toUpperCase())}</div>`;
@@ -70,7 +71,7 @@ function ago(ts) {
 const fullDate = (ts) => new Date(ts).toLocaleString('en-US', { hour: 'numeric', minute: '2-digit' }) + ' · ' + new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : n ? String(n) : '';
 function richText(t) {
-  return esc(t).replace(/(https?:\/\/[^\s<]+)|(^|[^\w&])@(\w{1,15})|(^|[^\w&])#([\p{L}\p{N}_]+)/gu, (m, url, p1, user, p2, tag) => {
+  return esc(t).replace(/(https?:\/\/[^\s<]+)|(^|[^\w&])@(\w(?:[\w.]{0,18}\w)?)|(^|[^\w&])#([\p{L}\p{N}_]+)/gu, (m, url, p1, user, p2, tag) => {
     if (url) return `<a class="link" href="${url}" target="_blank" rel="noopener noreferrer" data-ext>${url.length > 40 ? url.slice(0, 40) + '…' : url}</a>`;
     if (user) return `${p1}<a class="link" href="/u/${user}" data-link>@${user}</a>`;
     return `${p2}<a class="link" href="/search?q=${encodeURIComponent('#' + tag)}" data-link>#${tag}</a>`;
@@ -88,8 +89,8 @@ const routes = [
   [/^\/notifications$/, () => viewNotifications()],
   [/^\/search$/, () => viewSearch()],
   [/^\/post\/(\d+)$/, (m) => viewPost(m[1])],
-  [/^\/u\/(\w+)\/(followers|following)$/, (m) => viewFollowList(m[1], m[2])],
-  [/^\/u\/(\w+)(?:\/(replies|media|likes))?$/, (m) => viewProfile(m[1], m[2] || 'posts')],
+  [/^\/u\/([\w.]+)\/(followers|following)$/, (m) => viewFollowList(m[1], m[2])],
+  [/^\/u\/([\w.]+)(?:\/(replies|media|likes))?$/, (m) => viewProfile(m[1], m[2] || 'posts')],
 ];
 const PUBLIC = ['/login', '/signup'];
 function go(url, replace) {
@@ -420,20 +421,25 @@ function openEditProfile() {
 }
 
 // ---------- views ----------
+const GOOGLE_G = `<svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
 function viewAuth(mode) {
   const signup = mode === 'signup';
+  const googleError = new URLSearchParams(location.search).get('error') === 'google';
+  if (googleError) history.replaceState({}, '', location.pathname);
   $('#app').innerHTML = `<div class="auth">
     <div class="bigx"><div class="brand">${ic('z', '')}<span class="wordmark">ZuZu</span></div></div>
     <div class="panel">
       <h1>Happening now</h1>
       <p class="tagline">Join ZuZu today.</p>
       <h2>${signup ? 'Create your account' : 'Sign in'}</h2>
+      ${state.config.google ? `<a class="btn btn-google" href="/auth/google" data-google>${GOOGLE_G}<span>${signup ? 'Sign up with Google' : 'Continue with Google'}</span></a>
+      <div class="or"><span>or</span></div>` : ''}
       <form data-form="auth" data-mode="${mode}" autocomplete="on">
         ${signup ? `<div class="field"><label>Name</label><input name="name" maxlength="50" autocomplete="name"></div>` : ''}
         <div class="field"><label>Username</label><input name="username" required autocapitalize="none" autocomplete="username" ${signup ? 'placeholder="e.g. akhil_rajan" autocorrect="off" spellcheck="false"' : ''}></div>
         <div class="field"><label>Password</label><input name="password" type="password" required ${signup ? 'minlength="6" autocomplete="new-password"' : 'autocomplete="current-password"'}></div>
         <button class="btn btn-light" type="submit">${signup ? 'Create account' : 'Log in'}</button>
-        <div class="err"></div>
+        <div class="err" role="alert">${googleError ? 'Couldn’t sign in with Google. Please try again, or use your username and password.' : ''}</div>
       </form>
       <div class="alt">${signup ? 'Already have an account? <a href="/login" data-link>Sign in</a>' : 'Don’t have an account? <a href="/signup" data-link>Sign up</a>'}</div>
       ${signup ? '' : `<div class="demo">Demo login: <b>demo</b> / <b>demo1234</b></div>`}
@@ -576,5 +582,8 @@ setInterval(async () => {
     $$('a[href="/notifications"]').forEach(a => { if (!$('.badge', a)) a.insertAdjacentHTML('beforeend', `<span class="badge">${state.unread}</span>`); });
   }
 }, 30000);
-refreshMe().then(render);
+async function loadConfig() {
+  try { state.config = await api('GET', '/api/config'); } catch {}
+}
+Promise.all([refreshMe(), loadConfig()]).then(render);
 })();
