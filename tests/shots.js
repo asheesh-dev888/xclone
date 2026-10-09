@@ -1,0 +1,26 @@
+// Read-only screenshots as demo user: node tests/shots.js [baseUrl]
+const { chromium } = require('playwright-core');
+const BASE = process.argv[2] || 'http://localhost:4180';
+const OUT = require('path').join(__dirname, '..', 'screenshots');
+(async () => {
+  const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const ctx = await b.newContext({ viewport: { width: 1366, height: 900 } });
+  const p = await ctx.newPage();
+  await p.goto(BASE + '/login'); await p.waitForSelector('form[data-form=auth]');
+  await p.screenshot({ path: OUT + '/1-login.png' });
+  await p.fill('input[name=username]', 'demo'); await p.fill('input[name=password]', 'demo1234');
+  await p.click('button[type=submit]'); await p.waitForURL('**/home');
+  await p.click('.tab:has-text("Following")'); await p.waitForSelector('#feed .post'); await p.waitForTimeout(600);
+  await p.screenshot({ path: OUT + '/2-home-feed.png' });
+  await p.goto(BASE + '/u/priya_codes'); await p.waitForSelector('#feed .post'); await p.waitForTimeout(600);
+  await p.screenshot({ path: OUT + '/3-profile.png' });
+  await p.goto(BASE + '/post/1'); await p.waitForSelector('#replies .post'); await p.waitForTimeout(400);
+  await p.screenshot({ path: OUT + '/4-thread.png' });
+  const m = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await ctx.storageState() });
+  const mp = await m.newPage();
+  await mp.goto(BASE + '/home'); await mp.waitForSelector('#feed .post'); await mp.waitForTimeout(600);
+  await mp.screenshot({ path: OUT + '/5-mobile-feed.png' });
+  await mp.goto(BASE + '/u/demo'); await mp.waitForSelector('#feed .post'); await mp.waitForTimeout(600);
+  await mp.screenshot({ path: OUT + '/6-mobile-profile.png' });
+  await b.close(); console.log('saved to', OUT);
+})().catch(e => { console.error(e); process.exit(1); });

@@ -1,0 +1,23 @@
+{
+  "name": "xclone",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "mkdir -p data uploads && ([ -f data/app.db ] || node seed.js) && node server.js",
+    "seed": "node seed.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^11.10.0",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3",
+    "multer": "^2.4.0"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

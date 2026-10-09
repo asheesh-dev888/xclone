@@ -1,0 +1,52 @@
+// End-to-end API test: node tests/api-test.js [baseUrl]
+const BASE = process.argv[2] || 'http://localhost:4180';
+let pass = 0, fail = 0;
+const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗', m); } };
+function client() {
+  let cookie = '';
+  return async (method, path, body, isForm) => {
+    const headers = cookie ? { cookie } : {};
+    let b;
+    if (isForm) b = body; else if (body) { headers['content-type'] = 'application/json'; b = JSON.stringify(body); }
+    const r = await fetch(BASE + path, { method, headers, body: b });
+    const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+    return { status: r.status, data: await r.json().catch(() => ({})) };
+  };
+}
+(async () => {
+  const u = 'tester' + Math.floor(Math.random() * 1e5);
+  const a = client(), d = client();
+  let r = await a('POST', '/api/signup', { username: u, password: 'secret123', name: 'Test User' });
+  ok(r.status === 200 && r.data.user.username === u, 'sign up ' + u);
+  r = await a('POST', '/api/signup', { username: u, password: 'secret123' }); ok(r.status === 409, 'duplicate username rejected');
+  r = await d('POST', '/api/login', { username: 'demo', password: 'wrong' }); ok(r.status === 401, 'bad password rejected');
+  r = await d('POST', '/api/login', { username: 'demo', password: 'demo1234' }); ok(r.status === 200, 'demo login');
+  r = await a('POST', '/api/posts', (() => { const f = new FormData(); f.append('text', 'x'.repeat(281)); return f; })(), true); ok(r.status === 400, '281 chars rejected');
+  const fd = new FormData(); fd.append('text', 'Hello from the API test #testing');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  fd.append('image', new Blob([png], { type: 'image/png' }), 'dot.png');
+  r = await a('POST', '/api/posts', fd, true); ok(r.status === 200 && r.data.post.image, 'create post with image');
+  const pid = r.data.post.id;
+  r = await d('POST', `/api/posts/${pid}/like`); ok(r.data.post.like_count === 1 && r.data.post.liked, 'demo likes post');
+  const rf = new FormData(); rf.append('text', 'Nice post!'); rf.append('parent_id', pid);
+  r = await d('POST', '/api/posts', rf, true); ok(r.data.post.parent_id === pid, 'demo replies');
+  r = await d('POST', `/api/posts/${pid}/repost`); ok(r.data.post.repost_count === 1 && r.data.post.reposted, 'demo reposts');
+  r = await d('POST', `/api/users/${u}/follow`); ok(r.data.user.followers === 1 && r.data.user.is_following, 'demo follows tester');
+  r = await d('GET', '/api/feed/home'); ok(r.data.items.some(p => p.id === pid), 'post appears in demo home feed');
+  ok(r.data.items.some(p => p.reposted_by && p.reposted_by.username === 'demo'), 'repost appears in feed');
+  r = await a('GET', `/api/posts/${pid}`); ok(r.data.replies.length === 1 && r.data.post.reply_count === 1, 'thread has reply');
+  r = await a('GET', '/api/notifications'); const types = r.data.items.map(n => n.type).sort().join(',');
+  ok(['follow', 'like', 'reply', 'repost'].every(t => types.includes(t)), 'notifications: ' + types);
+  r = await a('GET', `/api/users/${u}`); ok(r.data.user.followers === 1 && r.data.user.posts === 1, 'profile counts');
+  const ef = new FormData(); ef.append('name', 'Renamed Tester'); ef.append('bio', 'I test things');
+  r = await a('PUT', '/api/me', ef, true); ok(r.data.user.name === 'Renamed Tester' && r.data.user.bio === 'I test things', 'edit profile');
+  r = await a('GET', '/api/search?q=' + u); ok(r.data.users.some(x => x.username === u), 'search users');
+  r = await a('GET', '/api/search?q=%23testing'); ok(r.data.posts.some(p => p.id === pid), 'search posts by hashtag');
+  r = await d('DELETE', `/api/posts/${pid}/like`); ok(r.data.post.like_count === 0, 'unlike');
+  r = await d('DELETE', `/api/users/${u}/follow`); ok(r.data.user.followers === 0, 'unfollow');
+  r = await d('DELETE', `/api/posts/${pid}`); ok(r.status === 403, 'cannot delete others\' post');
+  r = await a('DELETE', `/api/posts/${pid}`); ok(r.status === 200, 'delete own post');
+  r = await a('GET', `/api/posts/${pid}`); ok(r.status === 404, 'deleted post is gone');
+  r = await a('POST', '/api/logout'); r = await a('GET', '/api/feed/home'); ok(r.status === 401, 'logout ends session');
+  console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
+})();
