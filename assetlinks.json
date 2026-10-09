@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.zuzu.app",
+      "sha256_cert_fingerprints": [
+        "7B:B4:79:1C:24:FC:01:1D:4C:C8:C0:A3:CE:09:DA:B5:B9:01:63:F0:A3:DA:23:35:1A:E3:33:75:C4:DA:A8:D2"
+      ]
+    }
+  }
+]

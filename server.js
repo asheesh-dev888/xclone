@@ -17,13 +17,27 @@ const app = express();
 app.set('trust proxy', true);
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+
+// ---------- PWA / Android (Trusted Web Activity) ----------
+// Digital Asset Links for the ZuZu Android app (com.zuzu.app). Edit assetlinks.json to change the signing cert.
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.type('application/json').sendFile(path.join(ROOT, 'assetlinks.json'));
+});
+app.get('/sw.js', (req, res) => {
+  res.set({ 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/' });
+  res.type('application/javascript').sendFile(path.join(ROOT, 'public', 'sw.js'));
+});
+app.get('/manifest.webmanifest', (req, res) => {
+  res.type('application/manifest+json').sendFile(path.join(ROOT, 'public', 'manifest.webmanifest'));
+});
 // Wrap async handlers so rejected promises reach the error handler (Express 4).
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // ---------- auth ----------
 app.use(h(async (req, res, next) => {
   const token = req.cookies.sid || (req.headers.authorization || '').replace(/^Bearer /, '');
-  req.user = token && !req.path.startsWith('/media/') && !/\.(js|css|svg|png|ico)$/.test(req.path)
+  req.user = token && !req.path.startsWith('/media/') && !/\.(js|css|svg|png|ico|webmanifest)$/.test(req.path)
     ? await db.get('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1', [token])
     : null;
   next();
