@@ -430,7 +430,7 @@ function viewAuth(mode) {
       <h2>${signup ? 'Create your account' : 'Sign in'}</h2>
       <form data-form="auth" data-mode="${mode}" autocomplete="on">
         ${signup ? `<div class="field"><label>Name</label><input name="name" maxlength="50" autocomplete="name"></div>` : ''}
-        <div class="field"><label>Username</label><input name="username" required autocapitalize="none" autocomplete="username" ${signup ? 'pattern="[A-Za-z0-9_]{3,15}" title="3–15 letters, numbers or _"' : ''}></div>
+        <div class="field"><label>Username</label><input name="username" required autocapitalize="none" autocomplete="username" ${signup ? 'placeholder="e.g. akhil_rajan" autocorrect="off" spellcheck="false"' : ''}></div>
         <div class="field"><label>Password</label><input name="password" type="password" required ${signup ? 'minlength="6" autocomplete="new-password"' : 'autocomplete="current-password"'}></div>
         <button class="btn btn-light" type="submit">${signup ? 'Create account' : 'Log in'}</button>
         <div class="err"></div>

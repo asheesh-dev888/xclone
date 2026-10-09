@@ -38,16 +38,18 @@ async function startSession(res, userId) {
 const publicUser = (u) => u && ({ id: u.id, username: u.username, name: u.name, bio: u.bio, location: u.location, avatar: u.avatar, banner: u.banner, created_at: u.created_at });
 const findUser = (name) => db.get('SELECT * FROM users WHERE lower(username)=lower($1)', [String(name)]);
 
-const USERNAME_RE = /^[A-Za-z0-9_]{3,15}$/;
+const USERNAME_RE = /^[A-Za-z0-9_.]{3,20}$/;
+const cleanUsername = (u) => String(u || '').trim().replace(/^@/, '').replace(/\s+/g, '_');
 app.post('/api/signup', h(async (req, res) => {
-  const { username = '', password = '', name = '' } = req.body || {};
-  if (!USERNAME_RE.test(username)) return res.status(400).json({ error: 'Username must be 3–15 letters, numbers or _' });
+  const { password = '', name = '' } = req.body || {};
+  const username = cleanUsername((req.body || {}).username);
+  if (!USERNAME_RE.test(username)) return res.status(400).json({ error: 'Username must be 3–20 characters: letters, numbers, _ or . (no spaces or emoji)' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   if (await findUser(username)) return res.status(409).json({ error: 'Username already taken' });
   let u;
   try {
     u = await db.get('INSERT INTO users(username,name,password_hash,created_at) VALUES ($1,$2,$3,$4) RETURNING *',
-      [username, (name || username).slice(0, 50), bcrypt.hashSync(password, 10), now()]);
+      [username, (name || String((req.body || {}).username || '').trim().replace(/^@/, '') || username).slice(0, 50), bcrypt.hashSync(password, 10), now()]);
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Username already taken' });
     throw e;
