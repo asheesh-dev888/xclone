@@ -1,6 +1,8 @@
 // ZuZu service worker: network-first for the app shell/static files, with an offline fallback.
-// Never caches API, auth, media uploads or non-GET requests.
-const CACHE = 'zuzu-v1';
+// Never caches API, auth, media uploads, app downloads (/download) or non-GET requests.
+const CACHE = 'zuzu-v2';
+// Paths that always go straight to the network and are never cached.
+const BYPASS = /^\/(api|auth|media|download|healthz|\.well-known)(\/|$)/;
 const SHELL = ['/', '/style.css', '/app.js', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -18,7 +20,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  if (/^\/(api|auth|media|healthz|\.well-known)(\/|$)/.test(url.pathname)) return; // straight to network
+  if (BYPASS.test(url.pathname)) return; // straight to network, never cached
   const isPage = req.mode === 'navigate';
   e.respondWith(
     fetch(req).then((res) => {

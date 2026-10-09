@@ -35,6 +35,19 @@ exp, email_verified) -> user found by `google_id`, else linked by matching `emai
 Failures redirect to `/login?error=google`. Google-only users have no password (`password_hash` NULL),
 so password login tells them to use Google. `GOOGLE_TOKEN_URL` is only for tests (mock token endpoint).
 
+## Android app download
+The signed APK (package `com.zuzu.app`) is committed at `public/download/ZuZu.apk` and served from
+`GET /download/ZuZu.apk` (`Content-Type: application/vnd.android.package-archive`,
+`Content-Disposition: attachment; filename="ZuZu.apk"`). The service worker never caches `/download`.
+To ship a new build, replace that file and commit.
+
+The SPA shows "Get the Android app" (with "Requires Chrome. Allow install from unknown sources.") under the
+login/sign-up form, in the left nav and as a right-sidebar card when logged in, and on mobile as a dismissible
+banner at the top of the home feed (dismissal kept in `localStorage` `zuzu.appBannerDismissed`).
+It is shown only on Android and desktop browsers: hidden on iOS and inside the app itself, detected by
+`display-mode: standalone`, a `document.referrer` starting with `android-app://com.zuzu.app`, or `?source=twa`
+(remembered in `sessionStorage` for the tab).
+
 ## Local commands
     cd /workspace/xclone
     ./start.sh app        # (re)start the app in the background (logs: server.log)
@@ -48,4 +61,4 @@ so password login tells them to use Google. `GOOGLE_TOKEN_URL` is only for tests
 
 ## Files
 server.js (API + static), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
-public/{index.html,style.css,app.js,favicon.svg}, bin/cloudflared, screenshots/.
+public/{index.html,style.css,app.js,favicon.svg,sw.js,download/ZuZu.apk}, bin/cloudflared, screenshots/.

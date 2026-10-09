@@ -67,6 +67,7 @@ function client() {
   mr = await fetch(BASE + img); ok(mr.status === 404, 'deleted post\'s image is gone');
   r = await a('GET', '/healthz'); ok(r.status === 200 && r.data.db === 'ok', 'healthz checks DB');
   r = await a('POST', '/api/logout'); r = await a('GET', '/api/feed/home'); ok(r.status === 401, 'logout ends session');
+  await downloadTests();
   await googleTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
@@ -178,4 +179,29 @@ async function googleTests() {
   } finally {
     await pg.end(); app.child.kill(); mock.srv.close();
   }
+}
+
+// Android APK download: GET /download/ZuZu.apk headers + bytes, and the service worker must not cache /download.
+async function downloadTests() {
+  const fs = require('fs'), path = require('path');
+  const repoApk = path.join(__dirname, '..', 'public', 'download', 'ZuZu.apk');
+  const srcApk = '/workspace/zuzu-android/ZuZu.apk';
+  const expected = fs.readFileSync(fs.existsSync(srcApk) ? srcApk : repoApk);
+  let r = await fetch(BASE + '/download/ZuZu.apk');
+  const bytes = Buffer.from(await r.arrayBuffer());
+  ok(r.status === 200, 'GET /download/ZuZu.apk -> 200');
+  ok(r.headers.get('content-type') === 'application/vnd.android.package-archive', 'APK Content-Type: ' + r.headers.get('content-type'));
+  ok(r.headers.get('content-disposition') === 'attachment; filename="ZuZu.apk"', 'APK Content-Disposition: ' + r.headers.get('content-disposition'));
+  ok(+r.headers.get('content-length') === expected.length, 'APK Content-Length = ' + expected.length);
+  ok(bytes.equals(expected), `APK bytes match ${fs.existsSync(srcApk) ? srcApk : repoApk} (${bytes.length} bytes)`);
+  ok(fs.readFileSync(repoApk).equals(expected), 'committed public/download/ZuZu.apk matches the source APK');
+  ok(bytes.subarray(0, 2).toString() === 'PK', 'APK is a zip archive');
+  r = await fetch(BASE + '/download/ZuZu.apk', { method: 'HEAD' });
+  ok(r.status === 200 && r.headers.get('content-type') === 'application/vnd.android.package-archive' && /attachment/.test(r.headers.get('content-disposition')), 'HEAD /download/ZuZu.apk has the same headers');
+  r = await fetch(BASE + '/download/Nope.apk'); ok(r.status === 404 || !/package-archive/.test(r.headers.get('content-type') || ''), 'unknown download path is not served as an APK');
+  const sw = await (await fetch(BASE + '/sw.js')).text();
+  const m = sw.match(/const BYPASS = (\/.*\/);/);
+  const bypass = m && new Function('return ' + m[1])();
+  ok(bypass && bypass.test('/download/ZuZu.apk') && bypass.test('/download') && bypass.test('/api/me') && !bypass.test('/app.js') && !bypass.test('/downloads-page'), 'service worker bypasses (never caches) /download');
+  ok(bypass && !/['"]\/download/.test(sw.match(/const SHELL = \[[^\]]*\]/)[0]), '/download not precached in the SW shell list');
 }

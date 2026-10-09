@@ -30,9 +30,51 @@ const P = {
   pin: 'M12 7c-1.93 0-3.5 1.57-3.5 3.5S10.07 14 12 14s3.5-1.57 3.5-3.5S13.93 7 12 7zm0 5c-.827 0-1.5-.673-1.5-1.5S11.173 9 12 9s1.5.673 1.5 1.5S12.827 12 12 12zm0-10c-4.687 0-8.5 3.813-8.5 8.5 0 5.967 7.621 11.116 7.945 11.332l.555.37.555-.37c.324-.216 7.945-5.365 7.945-11.332C20.5 5.813 16.687 2 12 2zm0 17.77c-1.665-1.241-6.5-5.196-6.5-9.27C5.5 6.916 8.416 4 12 4s6.5 2.916 6.5 6.5c0 4.073-4.835 8.028-6.5 9.27z',
   camera: 'M9.697 3H11v2h-.697l-3 2H5c-.276 0-.5.224-.5.5v11c0 .276.224.5.5.5h14c.276 0 .5-.224.5-.5V10h2v8.5c0 1.381-1.119 2.5-2.5 2.5H5c-1.381 0-2.5-1.119-2.5-2.5v-11C2.5 6.119 3.619 5 5 5h1.697l3-2zM12 10.5c-1.105 0-2 .895-2 2s.895 2 2 2 2-.895 2-2-.895-2-2-2zm-4 2c0-2.209 1.791-4 4-4s4 1.791 4 4-1.791 4-4 4-4-1.791-4-4zM17 2c0 1.657-1.343 3-3 3v1c1.657 0 3 1.343 3 3h1c0-1.657 1.343-3 3-3V5c-1.657 0-3-1.343-3-3h-1z',
   userFill: 'M17.863 13.44c1.477 1.58 2.366 3.8 2.632 6.46l.11 1.1H3.395l.11-1.1c.266-2.66 1.155-4.88 2.632-6.46C7.627 11.85 9.648 11 12 11s4.373.85 5.863 2.44zM12 2C9.791 2 8 3.79 8 6s1.791 4 4 4 4-1.79 4-4-1.791-4-4-4z',
+  android: 'M17.6 9.48l1.84-3.18c.16-.31.04-.69-.26-.85a.637.637 0 0 0-.83.22l-1.88 3.24a11.463 11.463 0 0 0-8.94 0L5.65 5.67a.643.643 0 0 0-.87-.2c-.28.18-.37.54-.22.83L6.4 9.48A10.78 10.78 0 0 0 1 18h22a10.78 10.78 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z',
   logout: 'M16 13v-2H7V8l-5 4 5 4v-3h9zM20 3h-9c-1.103 0-2 .897-2 2v4h2V5h9v14h-9v-4H9v4c0 1.103.897 2 2 2h9c1.103 0 2-.897 2-2V5c0-1.103-.897-2-2-2z',
 };
 const ic = (name, cls = 'icon') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true"><path d="${P[name]}"/></svg>`;
+
+// ---------- Android app download ----------
+// The link is hidden inside the ZuZu Android app (TWA / installed PWA) and on iOS.
+const APK_URL = '/download/ZuZu.apk';
+const APP_NOTE = 'Requires Chrome. Allow install from unknown sources.';
+const BANNER_KEY = 'zuzu.appBannerDismissed';
+const store = (s, k, v) => { try { return v === undefined ? window[s].getItem(k) : window[s].setItem(k, v); } catch { return null; } };
+if (new URLSearchParams(location.search).get('source') === 'twa') store('sessionStorage', 'zuzu.twa', '1');
+if (document.referrer.startsWith('android-app://com.zuzu.app')) store('sessionStorage', 'zuzu.twa', '1');
+function inAndroidApp() {
+  return (window.matchMedia && matchMedia('(display-mode: standalone)').matches)
+    || document.referrer.startsWith('android-app://com.zuzu.app')
+    || store('sessionStorage', 'zuzu.twa') === '1';
+}
+function isIOS() {
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1); // iPadOS reports as a Mac
+}
+// Show on Android and desktop browsers only (not iOS or other mobile platforms, not inside the app).
+function showAppLink() {
+  if (inAndroidApp() || isIOS()) return false;
+  const ua = navigator.userAgent || '';
+  return /Android/i.test(ua) || !/Mobi|Tablet|Silk|Kindle|BlackBerry|Opera Mini|IEMobile/i.test(ua);
+}
+const appLinkAttrs = `href="${APK_URL}" download="ZuZu.apk" data-get-app`;
+function authAppLink() {
+  if (!showAppLink()) return '';
+  return `<div class="get-app-auth"><a class="btn btn-outline btn-android" ${appLinkAttrs}>${ic('android')}<span>Get the Android app</span></a><div class="app-note">${APP_NOTE}</div></div>`;
+}
+function navAppLink() {
+  if (!showAppLink()) return '';
+  return `<a class="nav-item nav-app" ${appLinkAttrs} title="Get the Android app. ${APP_NOTE}">${ic('android')}<span class="lbl">Get the Android app<small class="app-note">${APP_NOTE}</small></span></a>`;
+}
+function sideAppCard() {
+  if (!showAppLink()) return '';
+  return `<div class="card app-card" id="app-card"><h2>${ic('android')}Get the Android app</h2><p>Take ZuZu with you. Install the app on your Android phone.</p><a class="btn btn-light btn-android" ${appLinkAttrs}>${ic('android')}Download ZuZu.apk</a><div class="app-note">${APP_NOTE}</div></div>`;
+}
+function appBanner() {
+  if (!showAppLink() || store('localStorage', BANNER_KEY) === '1') return '';
+  return `<div class="app-banner" id="app-banner" role="region" aria-label="Get the Android app"><a class="app-link" ${appLinkAttrs}><span class="app-ic">${ic('android')}</span><span class="txt"><span class="t">Get the Android app</span><span class="app-note">${APP_NOTE}</span></span></a><button class="x" data-action="dismiss-app-banner" aria-label="Dismiss">${ic('close')}</button></div>`;
+}
 
 // ---------- state & api ----------
 const state = { me: null, unread: 0, homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false } };
@@ -127,6 +169,7 @@ function shell(center, { active = '' } = {}) {
       ${navItem('/explore', 'explore', 'search', null, 'Explore')}
       ${navItem('/notifications', 'notifications', 'bell', null, 'Notifications')}
       ${navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
+      ${navAppLink()}
       <button class="btn btn-primary btn-big" data-action="compose">${ic('feather')}<span class="lbl">Post</span></button>
       <div class="me-chip" data-action="me-menu">${avatar(me)}<div class="who"><div style="font-weight:700">${esc(me.name)}</div><div style="color:var(--muted)">@${esc(me.username)}</div></div><span class="dots">${ic('dots')}</span></div>
     </header>
@@ -140,6 +183,7 @@ function shell(center, { active = '' } = {}) {
     </main>
     <aside class="side">
       <div class="searchbox"><form class="search" data-form="search">${ic('search')}<input name="q" placeholder="Search" autocomplete="off" value="${esc(new URLSearchParams(location.search).get('q') || '')}"></form></div>
+      ${sideAppCard()}
       <div class="card" id="trends"><h2>What’s happening</h2>${loader()}</div>
       <div class="card" id="wtf"><h2>Who to follow</h2>${loader()}</div>
       <div class="footer-note">ZuZu · a demo social app</div>
@@ -391,6 +435,7 @@ document.addEventListener('click', async (e) => {
     else if (a === 'back') history.length > 1 ? history.back() : go('/home');
     else if (a === 'home-tab') { state.homeTab = el.dataset.tab; localStorage.setItem('homeTab', state.homeTab); viewHome(); }
     else if (a === 'go') go(el.dataset.href);
+    else if (a === 'dismiss-app-banner') { store('localStorage', BANNER_KEY, '1'); $('#app-banner')?.remove(); }
   } catch (err) {
     el.classList.remove('pop');
     toast(err.message);
@@ -442,6 +487,7 @@ function viewAuth(mode) {
         <div class="err" role="alert">${googleError ? 'Couldn’t sign in with Google. Please try again, or use your username and password.' : ''}</div>
       </form>
       <div class="alt">${signup ? 'Already have an account? <a href="/login" data-link>Sign in</a>' : 'Don’t have an account? <a href="/signup" data-link>Sign up</a>'}</div>
+      ${authAppLink()}
       ${signup ? '' : `<div class="demo">Demo login: <b>demo</b> / <b>demo1234</b></div>`}
     </div></div>`;
 }
@@ -462,6 +508,7 @@ function viewHome() {
       <button class="tab ${t === 'foryou' ? 'active' : ''}" data-action="home-tab" data-tab="foryou">For you</button>
       <button class="tab ${t === 'following' ? 'active' : ''}" data-action="home-tab" data-tab="following">Following</button>
     </div></div>
+    ${appBanner()}
     ${composerHTML({ id: 'home-composer' })}
     <div id="feed">${loader()}</div>`, { active: 'home' });
   loadFeed(t === 'following' ? '/api/feed/home' : '/api/feed/explore',

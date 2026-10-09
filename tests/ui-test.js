@@ -35,10 +35,20 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   step('Google button ' + (cfg.google ? 'configured' : 'hidden (GOOGLE_CLIENT_ID not set)'));
   if (shots) await page.screenshot({ path: OUT + '/1-login.png' });
   step('login page');
+  await expectAppLink(page, '.auth .get-app-auth a[data-get-app]', 'login page');
+  const linkBelowForm = await page.evaluate(() => !!(document.querySelector('form[data-form=auth]').compareDocumentPosition(document.querySelector('.get-app-auth')) & 4));
+  if (!linkBelowForm) throw new Error('Get the Android app link is not under the login form');
+  if (!(await page.textContent('.get-app-auth')).includes('Requires Chrome. Allow install from unknown sources.')) throw new Error('install note missing on login page');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: OUT + '/8-download-login.png' });
+  step('login page shows "Get the Android app" + note under the form (screenshot 8-download-login.png)');
 
   // sign up new user
   const u = 'ui' + Math.floor(Math.random() * 1e5);
   await page.click('text=Sign up');
+  await page.waitForSelector('form[data-mode=signup]');
+  await expectAppLink(page, '.auth .get-app-auth a[data-get-app]', 'sign-up page');
+  step('sign-up page shows "Get the Android app"');
   await page.fill('input[name=name]', 'UI Tester');
   await page.fill('input[name=username]', u);
   await page.fill('input[name=password]', 'secret123');
@@ -53,6 +63,11 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   step('created post');
   if (!(await page.textContent('.nav .logo')).includes('ZuZu')) throw new Error('nav wordmark missing');
   step('nav shows ZuZu wordmark');
+  await expectAppLink(page, '.nav a.nav-app[data-get-app]', 'left nav');
+  await expectAppLink(page, '.side #app-card a[data-get-app]', 'right sidebar card');
+  if (!(await page.textContent('#app-card')).includes('Requires Chrome. Allow install from unknown sources.')) throw new Error('install note missing in sidebar card');
+  if (await page.isVisible('#app-banner')) throw new Error('mobile app banner should not show on desktop');
+  step('logged-in desktop: "Get the Android app" in left nav + sidebar card (no mobile banner)');
 
   // post with image (stored in Postgres, served from /media/:id)
   await page.fill('#home-composer textarea', 'Posting a picture #testing');
@@ -153,11 +168,106 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     await mp.screenshot({ path: OUT + '/5-mobile-profile.png' });
     step('screenshots saved');
   }
+  await downloadUi(browser, errors, step, await ctx.storageState());
   await googleUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
   await browser.close();
   process.exit(errors.length ? 1 : 0);
 })().catch(e => { console.error('FAILED:', e.message); process.exit(1); });
+
+// ---------- Android app download link ----------
+const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
+const IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+async function expectAppLink(page, sel, where) {
+  await page.waitForSelector(sel, { state: 'visible', timeout: 5000 }).catch(() => { throw new Error(`"Get the Android app" not visible in ${where} (${sel})`); });
+  const href = await page.getAttribute(sel, 'href');
+  if (href !== '/download/ZuZu.apk') throw new Error(`${where}: link href is ${href}`);
+  if (!(await page.$(sel + ' svg'))) throw new Error(`${where}: Android icon missing`);
+}
+const APP_LINK_SEL = '[data-get-app], #app-card, #app-banner, .get-app-auth';
+async function expectNoAppLink(page, where) {
+  const n = await page.$$eval(APP_LINK_SEL, (els) => els.length);
+  if (n) throw new Error(`"Get the Android app" should be hidden (${where}) but ${n} element(s) found`);
+}
+async function downloadUi(browser, errors, step, loggedIn) {
+  const watch = (p) => { p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
+  const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+
+  // Android phone browser: dismissible banner at the top of the home feed, remembered in localStorage.
+  let c = await browser.newContext({ ...mobile, userAgent: ANDROID_UA, storageState: loggedIn });
+  let p = await c.newPage(); watch(p);
+  await p.goto(BASE + '/home'); await p.waitForSelector('#feed .post');
+  await expectAppLink(p, '#app-banner a[data-get-app]', 'mobile home banner');
+  const atTop = await p.evaluate(() => { const b = document.querySelector('#app-banner'), f = document.querySelector('#home-composer'); return !!(b.compareDocumentPosition(f) & 4); });
+  if (!atTop) throw new Error('banner is not at the top of the home feed');
+  if (!(await p.textContent('#app-banner')).includes('Requires Chrome. Allow install from unknown sources.')) throw new Error('install note missing in banner');
+  await p.waitForTimeout(400);
+  await p.screenshot({ path: OUT + '/9-download-mobile.png' });
+  step('Android mobile: banner at top of home feed (screenshot 9-download-mobile.png)');
+  await p.click('#app-banner [data-action="dismiss-app-banner"]');
+  await p.waitForSelector('#app-banner', { state: 'detached' });
+  if (await p.evaluate(() => localStorage.getItem('zuzu.appBannerDismissed')) !== '1') throw new Error('dismissal not stored in localStorage');
+  await p.reload(); await p.waitForSelector('#feed .post');
+  if (await p.$('#app-banner')) throw new Error('banner came back after dismissal + reload');
+  step('banner dismissal remembered in localStorage');
+  await c.close();
+  c = await browser.newContext({ ...mobile, userAgent: ANDROID_UA });
+  p = await c.newPage(); watch(p);
+  await p.goto(BASE + '/login'); await p.waitForSelector('form[data-form=auth]');
+  await expectAppLink(p, '.get-app-auth a[data-get-app]', 'Android login page');
+  step('Android mobile login page shows the link');
+  await c.close();
+
+  // Inside the app: display-mode standalone, ?source=twa (kept in sessionStorage), android-app:// referrer.
+  const standalone = () => {
+    const orig = window.matchMedia.bind(window);
+    window.matchMedia = (q) => /display-mode:\s*standalone/.test(q)
+      ? { matches: true, media: q, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } }
+      : orig(q);
+  };
+  const cases = [
+    ['display-mode standalone', { init: standalone }],
+    ['?source=twa', { query: '?source=twa' }],
+    ['android-app://com.zuzu.app referrer', { init: () => Object.defineProperty(Document.prototype, 'referrer', { get: () => 'android-app://com.zuzu.app' }) }],
+  ];
+  for (const [name, { init, query = '' }] of cases) {
+    for (const [label, opts] of [['desktop', { viewport: { width: 1366, height: 900 } }], ['Android', { ...mobile, userAgent: ANDROID_UA }]]) {
+      c = await browser.newContext(opts);
+      if (init) await c.addInitScript(init);
+      p = await c.newPage(); watch(p);
+      await p.goto(BASE + '/login' + query); await p.waitForSelector('form[data-form=auth]');
+      await expectNoAppLink(p, `${name}, ${label} login`);
+      await p.click('text=Sign up'); await p.waitForSelector('form[data-mode=signup]');
+      await expectNoAppLink(p, `${name}, ${label} sign-up`);
+      await p.click('text=Sign in'); await p.waitForSelector('form[data-mode=login]');
+      await p.fill('input[name=username]', 'demo'); await p.fill('input[name=password]', 'demo1234');
+      await p.click('button[type=submit]'); await p.waitForURL('**/home'); await p.waitForSelector('#feed .post');
+      await expectNoAppLink(p, `${name}, ${label} home`);
+      if (query) {
+        await p.goto(BASE + '/explore'); await p.waitForSelector('#feed .post');
+        await expectNoAppLink(p, `${name}, ${label} after full reload without the flag`);
+      }
+      await c.close();
+    }
+    step(`hidden inside the Android app (${name}): login, sign-up, nav, sidebar, banner`);
+  }
+
+  // iOS: never shown.
+  for (const [label, opts] of [['iPhone', { ...mobile, userAgent: IOS_UA }], ['iPad (desktop UA)', { viewport: { width: 1180, height: 820 }, hasTouch: true, isMobile: true, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15' }]]) {
+    const ipadTouch = () => Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => 5 }); // real iPads report 5
+    c = await browser.newContext({ ...opts, storageState: loggedIn }); await c.addInitScript(ipadTouch);
+    p = await c.newPage(); watch(p);
+    await p.goto(BASE + '/home'); await p.waitForSelector('#feed .post');
+    await expectNoAppLink(p, label + ' home');
+    await c.close();
+    c = await browser.newContext(opts); await c.addInitScript(ipadTouch);
+    p = await c.newPage(); watch(p);
+    await p.goto(BASE + '/login'); await p.waitForSelector('form[data-form=auth]');
+    await expectNoAppLink(p, label + ' login');
+    await c.close();
+  }
+  step('hidden on iOS (iPhone + iPad)');
+}
 
 // Continue with Google against a local instance configured with a mock Google token endpoint.
 async function googleUi(browser, errors, step) {

@@ -31,13 +31,24 @@ app.get('/sw.js', (req, res) => {
 app.get('/manifest.webmanifest', (req, res) => {
   res.type('application/manifest+json').sendFile(path.join(ROOT, 'public', 'manifest.webmanifest'));
 });
+// Android app download (signed APK for com.zuzu.app, committed at public/download/ZuZu.apk).
+const APK_PATH = path.join(ROOT, 'public', 'download', 'ZuZu.apk');
+app.get('/download/ZuZu.apk', (req, res, next) => {
+  res.set({
+    'Content-Type': 'application/vnd.android.package-archive',
+    'Content-Disposition': 'attachment; filename="ZuZu.apk"',
+    'Cache-Control': 'no-cache',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.sendFile(APK_PATH, (err) => { if (err && !res.headersSent) { res.removeHeader('Content-Disposition'); res.status(404).type('text').send('Not found'); } });
+});
 // Wrap async handlers so rejected promises reach the error handler (Express 4).
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // ---------- auth ----------
 app.use(h(async (req, res, next) => {
   const token = req.cookies.sid || (req.headers.authorization || '').replace(/^Bearer /, '');
-  req.user = token && !req.path.startsWith('/media/') && !/\.(js|css|svg|png|ico|webmanifest)$/.test(req.path)
+  req.user = token && !req.path.startsWith('/media/') && !/\.(js|css|svg|png|ico|webmanifest|apk)$/.test(req.path)
     ? await db.get('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1', [token])
     : null;
   next();
