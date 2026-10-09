@@ -9,7 +9,9 @@ svg{fill:currentColor}
 .layout{display:flex;justify-content:center;min-height:100vh}
 /* left nav */
 .nav{width:275px;flex:none;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:4px 12px;}
-.nav .logo{width:52px;height:52px;display:flex;align-items:center;justify-content:center;border-radius:50%}
+.nav .logo{height:52px;min-width:52px;width:max-content;display:flex;align-items:center;justify-content:center;gap:10px;padding:0 11px;border-radius:999px}
+.wordmark{font-weight:800;letter-spacing:-.5px}
+.nav .logo .wordmark{font-size:26px;padding-right:6px}
 .nav .logo:hover{background:var(--hover)}
 .nav .logo svg{width:30px;height:30px}
 .nav-item{display:flex;align-items:center;gap:20px;padding:12px;border-radius:999px;font-size:20px;width:max-content;position:relative}
@@ -185,7 +187,10 @@ svg{fill:currentColor}
 /* auth */
 .auth{min-height:100vh;display:flex;align-items:center;justify-content:center;gap:40px;padding:24px}
 .auth .bigx{flex:1;display:flex;align-items:center;justify-content:center;max-width:600px}
-.auth .bigx svg{width:60%;max-width:340px}
+.auth .bigx .brand{display:flex;flex-direction:column;align-items:center;gap:24px;width:60%;max-width:340px}
+.auth .bigx svg{width:100%}
+.auth .bigx .wordmark{font-size:64px}
+.auth .tagline{font-size:20px;color:var(--muted);margin:-20px 0 28px}
 .auth .panel{flex:1;max-width:460px}
 .auth h1{font-size:56px;font-weight:800;letter-spacing:-1px;margin:0 0 36px;line-height:1.1}
 .auth h2{font-size:28px;font-weight:800;margin:0 0 20px}
@@ -201,7 +206,8 @@ svg{fill:currentColor}
 /* responsive */
 @media (max-width:1280px){
   .nav{width:88px;align-items:center}
-  .nav-item span.lbl,.me-chip .who,.me-chip .dots{display:none}
+  .nav-item span.lbl,.me-chip .who,.me-chip .dots,.nav .logo .wordmark{display:none}
+  .nav .logo{padding:0}
   .nav .btn-big{width:52px;height:52px;padding:0}
   .nav .btn-big .lbl{display:none}.nav .btn-big .icon{display:block}
   .menu{left:0}
@@ -228,7 +234,9 @@ svg{fill:currentColor}
   .pf .top{height:52px}
   .auth{flex-direction:column;justify-content:flex-start;gap:12px;padding-top:40px}
   .auth .bigx{justify-content:flex-start;flex:none;width:100%;max-width:460px}
-  .auth .bigx svg{width:48px}
+  .auth .bigx .brand{flex-direction:row;width:auto;gap:12px}
+  .auth .bigx svg{width:44px}
+  .auth .bigx .wordmark{font-size:34px}
   .auth h1{font-size:38px;margin-bottom:24px}
   .auth .panel{width:100%}
   .post{padding:10px 12px}

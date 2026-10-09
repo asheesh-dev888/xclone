@@ -1,4 +1,4 @@
-// Read-only screenshots as demo user: node tests/shots.js [baseUrl]
+// Read-only ZuZu screenshots as demo user: node tests/shots.js [baseUrl]
 const { chromium } = require('playwright-core');
 const BASE = process.argv[2] || 'http://localhost:4180';
 const OUT = require('path').join(__dirname, '..', 'screenshots');

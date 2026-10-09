@@ -1,4 +1,4 @@
-/* X clone SPA — vanilla JS, no build step. */
+/* ZuZu SPA — vanilla JS, no build step. */
 (() => {
 'use strict';
 const $ = (s, el = document) => el.querySelector(s);
@@ -8,7 +8,7 @@ const MAX = 280;
 
 // ---------- icons ----------
 const P = {
-  x: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z',
+  z: 'M3 2.5h18v3.4L8.9 18.1H21v3.4H3v-3.4L15.1 5.9H3z',
   home: 'M21.591 7.146L12.52 1.157c-.316-.21-.724-.21-1.04 0l-9.071 5.99c-.26.173-.409.456-.409.757v13.183c0 .502.418.913.929.913H9.14c.51 0 .929-.41.929-.913v-7.075h3.909v7.075c0 .502.417.913.928.913h6.165c.511 0 .929-.41.929-.913V7.904c0-.301-.158-.584-.408-.758zM20 20l-4.5.01.011-7.097c0-.502-.418-.913-.928-.913H9.44c-.511 0-.929.41-.929.913L8.5 20H4V8.773l8.011-5.342L20 8.764z',
   homeFill: 'M21.591 7.146L12.52 1.157c-.316-.21-.724-.21-1.04 0l-9.071 5.99c-.26.173-.409.456-.409.757v13.183c0 .502.418.913.929.913h6.638c.511 0 .929-.41.929-.913v-7.075h3.008v7.075c0 .502.418.913.929.913h6.639c.51 0 .928-.41.928-.913V7.904c0-.301-.158-.584-.408-.758z',
   search: 'M10.25 3.75c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.795 0 3.419-.726 4.596-1.904 1.178-1.177 1.904-2.801 1.904-4.596 0-3.59-2.91-6.5-6.5-6.5zm-8.5 6.5c0-4.694 3.806-8.5 8.5-8.5s8.5 3.806 8.5 8.5c0 1.986-.682 3.815-1.824 5.262l4.781 4.781-1.414 1.414-4.781-4.781c-1.447 1.142-3.276 1.824-5.262 1.824-4.694 0-8.5-3.806-8.5-8.5z',
@@ -121,7 +121,7 @@ function shell(center, { active = '' } = {}) {
   $('#app').innerHTML = `
   <div class="layout">
     <header class="nav">
-      <a class="logo" href="/home" data-link aria-label="Home">${ic('x')}</a>
+      <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}<span class="wordmark">ZuZu</span></a>
       ${navItem('/home', 'home', 'home', 'homeFill', 'Home')}
       ${navItem('/explore', 'explore', 'search', null, 'Explore')}
       ${navItem('/notifications', 'notifications', 'bell', null, 'Notifications')}
@@ -132,7 +132,7 @@ function shell(center, { active = '' } = {}) {
     <main class="main">
       <div class="mobile-top">
         <a href="/u/${esc(me.username)}" data-link>${avatar(me, 'sm')}</a>
-        <a class="logo" href="/home" data-link>${ic('x')}</a>
+        <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}</a>
         <button class="spacer" data-action="logout" aria-label="Log out" title="Log out">${ic('logout')}</button>
       </div>
       <div id="center">${center}</div>
@@ -141,7 +141,7 @@ function shell(center, { active = '' } = {}) {
       <div class="searchbox"><form class="search" data-form="search">${ic('search')}<input name="q" placeholder="Search" autocomplete="off" value="${esc(new URLSearchParams(location.search).get('q') || '')}"></form></div>
       <div class="card" id="trends"><h2>What’s happening</h2>${loader()}</div>
       <div class="card" id="wtf"><h2>Who to follow</h2>${loader()}</div>
-      <div class="footer-note">X Clone prototype · demo app, not affiliated with X Corp.</div>
+      <div class="footer-note">ZuZu · a demo social app</div>
     </aside>
   </div>
   <button class="fab" data-action="compose" aria-label="Post">${ic('feather')}</button>
@@ -423,9 +423,10 @@ function openEditProfile() {
 function viewAuth(mode) {
   const signup = mode === 'signup';
   $('#app').innerHTML = `<div class="auth">
-    <div class="bigx">${ic('x', '')}</div>
+    <div class="bigx"><div class="brand">${ic('z', '')}<span class="wordmark">ZuZu</span></div></div>
     <div class="panel">
       <h1>Happening now</h1>
+      <p class="tagline">Join ZuZu today.</p>
       <h2>${signup ? 'Create your account' : 'Sign in'}</h2>
       <form data-form="auth" data-mode="${mode}" autocomplete="on">
         ${signup ? `<div class="field"><label>Name</label><input name="name" maxlength="50" autocomplete="name"></div>` : ''}
@@ -458,7 +459,7 @@ function viewHome() {
     ${composerHTML({ id: 'home-composer' })}
     <div id="feed">${loader()}</div>`, { active: 'home' });
   loadFeed(t === 'following' ? '/api/feed/home' : '/api/feed/explore',
-    `<div class="empty"><h3>Welcome to X Clone!</h3><p>Follow some people to fill your timeline, or check the For you tab.</p><a class="btn btn-primary" href="/explore" data-link>Explore</a></div>`);
+    `<div class="empty"><h3>Welcome to ZuZu!</h3><p>Follow some people to fill your timeline, or check the For you tab.</p><a class="btn btn-primary" href="/explore" data-link>Explore</a></div>`);
 }
 
 function viewExplore() {

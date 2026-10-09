@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# (Re)start the X clone app + Cloudflare quick tunnel in the background.
+# (Re)start the ZuZu app + Cloudflare quick tunnel in the background.
+# The app uses local PostgreSQL: DATABASE_URL comes from .env.local (git-ignored) unless already set.
 # Usage: ./start.sh            -> restart app and tunnel (tunnel URL changes)
 #        ./start.sh app        -> restart only the app (tunnel URL stays)
 #        ./start.sh tunnel     -> restart only the tunnel (new URL)
 cd "$(dirname "$0")"
 PORT="${PORT:-4180}"
 what="${1:-all}"
+if [[ -z $DATABASE_URL && -f .env.local ]]; then set -a; source .env.local; set +a; fi
+[[ -z $DATABASE_URL ]] && { echo "DATABASE_URL not set (put it in .env.local)"; exit 1; }
 if [[ $what == all || $what == app ]]; then
+  if [[ $DATABASE_URL == *@localhost* || $DATABASE_URL == *@127.0.0.1* ]]; then
+    pg_isready -q -h localhost || { sudo service postgresql start >/dev/null; sleep 2; }
+  fi
   pkill -f "node /workspace/xclone/server.js" 2>/dev/null; sleep 0.5
-  PORT=$PORT setsid nohup node /workspace/xclone/server.js >> server.log 2>&1 < /dev/null &
-  for i in $(seq 20); do curl -fs "localhost:$PORT/healthz" >/dev/null && break; sleep 0.5; done
+  DATABASE_URL=$DATABASE_URL PORT=$PORT setsid nohup node /workspace/xclone/server.js >> server.log 2>&1 < /dev/null &
+  for i in $(seq 40); do curl -fs "localhost:$PORT/healthz" >/dev/null && break; sleep 0.5; done
   curl -fs "localhost:$PORT/healthz" >/dev/null && echo "App running: http://localhost:$PORT" || { echo "App failed to start; see server.log"; exit 1; }
 fi
 if [[ $what == all || $what == tunnel ]]; then

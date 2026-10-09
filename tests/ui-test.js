@@ -3,6 +3,17 @@ const { chromium } = require('playwright-core');
 const BASE = process.argv[2] || 'http://localhost:4180';
 const OUT = __dirname + '/../screenshots';
 const shots = process.argv.includes('--shots');
+// Build a small solid-colour PNG in memory (no fixtures needed).
+function makePng(w, h, [r, g, b]) {
+  const zlib = require('zlib');
+  const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf) => { let c = 0xffffffff; for (const x of buf) c = crcT[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array(w).fill([r, g, b]).flat())]);
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(Buffer.concat(Array(h).fill(row)))), chunk('IEND', Buffer.alloc(0))]);
+}
+const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = document.querySelector(s); return i && i.complete && i.naturalWidth > 0; }, sel, { timeout: 10000 });
 (async () => {
   const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
   const errors = [];
@@ -15,6 +26,10 @@ const shots = process.argv.includes('--shots');
 
   await page.goto(BASE + '/');
   await page.waitForSelector('form[data-form=auth]');
+  if ((await page.title()) !== 'ZuZu') throw new Error('page title is not ZuZu: ' + await page.title());
+  if (!(await page.textContent('.auth')).includes('ZuZu')) throw new Error('login page lacks ZuZu wordmark');
+  if (/x ?clone/i.test(await page.content())) throw new Error('old X clone branding still on login page');
+  step('login page shows ZuZu branding');
   if (shots) await page.screenshot({ path: OUT + '/1-login.png' });
   step('login page');
 
@@ -33,6 +48,17 @@ const shots = process.argv.includes('--shots');
   await page.click('#home-composer button[type=submit]');
   await page.waitForSelector('#feed .post:has-text("headless browser")');
   step('created post');
+  if (!(await page.textContent('.nav .logo')).includes('ZuZu')) throw new Error('nav wordmark missing');
+  step('nav shows ZuZu wordmark');
+
+  // post with image (stored in Postgres, served from /media/:id)
+  await page.fill('#home-composer textarea', 'Posting a picture #testing');
+  await page.setInputFiles('#home-composer input[name=image]', { name: 'blue.png', mimeType: 'image/png', buffer: makePng(320, 180, [29, 155, 240]) });
+  await page.waitForSelector('#home-composer .preview:not([hidden])');
+  await page.click('#home-composer button[type=submit]');
+  await page.waitForSelector('#feed .post:has-text("Posting a picture") .media img[src^="/media/"]');
+  await imgLoaded(page, '#feed .post .media img[src^="/media/"]');
+  step('created post with image (served from /media)');
 
   // counter over limit disables button
   await page.fill('#home-composer textarea', 'a'.repeat(285));
@@ -72,9 +98,16 @@ const shots = process.argv.includes('--shots');
   await page.goto(BASE + '/u/' + u);
   await page.click('text=Edit profile');
   await page.fill('#edit-form textarea[name=bio]', 'I am a robot that tests things 🤖');
+  await page.setInputFiles('#edit-form input[name=avatar]', { name: 'av.png', mimeType: 'image/png', buffer: makePng(96, 96, [249, 24, 128]) });
+  await page.setInputFiles('#edit-form input[name=banner]', { name: 'bn.png', mimeType: 'image/png', buffer: makePng(600, 200, [0, 186, 124]) });
   await page.click('[data-action=save-profile]');
   await page.waitForSelector('.pf .bio:has-text("robot")');
-  step('edited profile');
+  await page.waitForSelector('.pf img.avatar[src^="/media/"]');
+  await imgLoaded(page, '.pf img.avatar');
+  if (!/\/media\//.test(await page.getAttribute('.banner', 'style') || '')) throw new Error('banner not set');
+  step('edited profile with avatar + banner');
+  await page.reload(); await page.waitForSelector('.pf img.avatar[src^="/media/"]'); await imgLoaded(page, '.pf img.avatar');
+  step('avatar persists after reload');
 
   // search
   await page.fill('.side input[name=q]', 'priya');

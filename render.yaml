@@ -6,3 +6,6 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL   # Neon connection string; set in the Render dashboard (not committed)
+        sync: false
