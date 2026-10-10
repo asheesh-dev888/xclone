@@ -35,6 +35,7 @@ const P = {
   mailFill: 'M1.998 4.499c0-.828.671-1.499 1.5-1.499h17c.828 0 1.5.671 1.5 1.499v2.858l-10 4.545-10-4.547V4.499zm0 5.053V19.5c0 .828.671 1.5 1.5 1.5h17c.828 0 1.5-.672 1.5-1.5V9.554l-10 4.545-10-4.547z',
   send: 'M2.504 21.866l.526-2.108C3.04 19.719 4 15.823 4 12s-.96-7.719-.97-7.757l-.527-2.109L22.236 12 2.504 21.866zM5.981 13c-.072 1.962-.34 3.833-.583 5.183L17.764 12 5.398 5.818c.242 1.349.51 3.221.583 5.183H10v2H5.981z',
   logout: 'M16 13v-2H7V8l-5 4 5 4v-3h9zM20 3h-9c-1.103 0-2 .897-2 2v4h2V5h9v14h-9v-4H9v4c0 1.103.897 2 2 2h9c1.103 0 2-.897 2-2V5c0-1.103-.897-2-2-2z',
+  sparkle: 'M10 2.5l1.95 5.55L17.5 10l-5.55 1.95L10 17.5l-1.95-5.55L2.5 10l5.55-1.95L10 2.5zm0 4.6l-.85 2.05L7.1 10l2.05.85L10 12.9l.85-2.05L12.9 10l-2.05-.85L10 7.1zM18.5 14l.95 2.55L22 17.5l-2.55.95L18.5 21l-.95-2.55L15 17.5l2.55-.95L18.5 14z',
 };
 const ic = (name, cls = 'icon') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true"><path d="${P[name]}"/></svg>`;
 
@@ -80,7 +81,7 @@ function appBanner() {
 }
 
 // ---------- state & api ----------
-const state = { me: null, unread: 0, dmUnread: 0, chat: null, convs: [], homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false } };
+const state = { me: null, unread: 0, dmUnread: 0, chat: null, convs: [], homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false, ai: false } };
 async function api(method, url, body) {
   const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body instanceof FormData) opts.body = body;
@@ -144,7 +145,7 @@ function go(url, replace) {
   render();
 }
 async function render() {
-  closeMenus();
+  closeMenus(); closeAi();
   const p = location.pathname;
   if (!state.me && !PUBLIC.includes(p)) return go('/login', true);
   if (state.me && PUBLIC.includes(p)) return go('/home', true);
@@ -236,7 +237,7 @@ function postHTML(p, { thread = false } = {}) {
     <div class="${thread ? 'avatar-col' : ''}"><a href="/u/${esc(p.username)}" data-link>${avatar(p)}</a></div>
     <div class="body">
       <div class="meta"><a class="name" href="/u/${esc(p.username)}" data-link>${esc(p.name)}</a><span class="handle">@${esc(p.username)}</span><span>·</span><a href="/post/${p.id}" data-link title="${esc(fullDate(p.created_at))}">${ago(p.created_at)}</a>
-        <button class="more" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}" aria-label="More">${ic('dots', 'icon')}</button></div>
+        ${aiBtn(p)}<button class="more" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}" aria-label="More">${ic('dots', 'icon')}</button></div>
       ${p.reply_to ? `<div class="replying">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
       ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
       ${p.image ? `<div class="media"><img src="${esc(p.image)}" loading="lazy" alt=""></div>` : ''}
@@ -578,7 +579,7 @@ async function viewPost(id) {
     el.innerHTML = `${ancestors.map(a => postHTML(a, { thread: true })).join('')}
       <div class="focus" data-post="${p.id}">
         <div class="head"><a href="/u/${esc(p.username)}" data-link>${avatar(p)}</a><div class="who"><a href="/u/${esc(p.username)}" data-link><b>${esc(p.name)}</b></a><div style="color:var(--muted)">@${esc(p.username)}</div></div>
-          <button class="more" style="position:relative;width:34px;height:34px;border-radius:50%;color:var(--muted)" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}">${ic('dots')}</button></div>
+          ${aiBtn(p)}<button class="more" style="position:relative;width:34px;height:34px;border-radius:50%;color:var(--muted)" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}">${ic('dots')}</button></div>
         ${p.reply_to ? `<div class="replying" style="margin-top:8px">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
         ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
         ${p.image ? `<div class="media"><img src="${esc(p.image)}" alt=""></div>` : ''}
@@ -923,6 +924,215 @@ document.addEventListener('click', async (e) => {
       c.msgs.delete(id); renderChat(c); toast('Message deleted'); loadConversations();
     }
   } catch (err) { el.disabled = false; toast(err.message); }
+}, true);
+
+// ---------- ZuZu AI: "Ask ZuZu AI" about a post (side panel on desktop, bottom sheet on mobile) ----------
+const AI_Q_MAX = 500;
+const ai = { post: null, history: [], busy: false, ctrl: null, opener: null };
+function aiBtn(p) {
+  if (!state.config.ai) return '';
+  return `<button class="ai-btn" data-action="ai-open" data-id="${p.id}" aria-label="Ask ZuZu AI" title="Ask ZuZu AI">${ic('sparkle')}</button>`;
+}
+// Offer "Translate to English" for Hindi / other non-Latin posts, otherwise "Translate to Hindi".
+function aiTranslateChip(p) {
+  const t = p.text || '';
+  if (/[\u0900-\u097F]/.test(t)) return ['translate_en', 'Translate to English'];
+  const letters = t.replace(/[\s\d\p{P}\p{S}]/gu, '');
+  const latin = (letters.match(/[A-Za-z\u00C0-\u024F]/g) || []).length;
+  return letters && latin / [...letters].length < 0.5 ? ['translate_en', 'Translate to English'] : ['translate_hi', 'Translate to Hindi'];
+}
+function aiChips(p) {
+  const chips = [['explain', 'Explain this post'], ['context', 'Give context'], ['summarize_replies', 'Summarize the replies'], ['fact_check', 'Fact-check']];
+  if (p && p.text) chips.push(aiTranslateChip(p));
+  return chips;
+}
+
+// Safe markdown: everything is escaped; only **bold**, *italic*, `code`, lists, headings and http(s) links are rendered.
+function aiLink(url, inner) {
+  try { const u = new URL(url); if (u.protocol === 'http:' || u.protocol === 'https:') return `<a class="link" href="${esc(u.href)}" target="_blank" rel="noopener noreferrer nofollow ugc">${inner}</a>`; } catch {}
+  return inner;
+}
+function mdInline(s) {
+  const re = /`([^`\n]+)`|\[([^\]\n]{1,300})\]\(\s*(https?:\/\/[^\s)]+)\s*\)|(https?:\/\/[^\s<>"'()]+)|\*\*([^*\n]+?)\*\*|__([^_\n]+?)__|(^|[^*\w])\*([^*\s][^*\n]*?)\*(?!\w)|(^|[^_\w])_([^_\s][^_\n]*?)_(?!\w)/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(s))) {
+    out += esc(s.slice(last, m.index));
+    if (m[1] != null) out += `<code>${esc(m[1])}</code>`;
+    else if (m[2] != null) out += aiLink(m[3], mdInline(m[2]));
+    else if (m[4] != null) {
+      let u = m[4]; const trail = u.match(/[.,!?;:]+$/); if (trail) u = u.slice(0, -trail[0].length);
+      out += aiLink(u, esc(u)); re.lastIndex = m.index + u.length;
+    } else if (m[5] != null || m[6] != null) out += `<strong>${mdInline(m[5] ?? m[6])}</strong>`;
+    else if (m[8] != null) out += esc(m[7]) + `<em>${mdInline(m[8])}</em>`;
+    else if (m[10] != null) out += esc(m[9]) + `<em>${mdInline(m[10])}</em>`;
+    last = re.lastIndex;
+  }
+  return out + esc(s.slice(last));
+}
+function mdRender(src) {
+  let html = '', list = null, para = [];
+  const flushP = () => { if (para.length) { html += `<p>${para.map(mdInline).join('<br>')}</p>`; para = []; } };
+  const closeL = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const line of String(src).replace(/\r/g, '').split('\n')) {
+    const ul = line.match(/^\s*[-*•]\s+(.*)$/), ol = line.match(/^\s*\d{1,3}[.)]\s+(.*)$/), h = line.match(/^\s*#{1,6}\s+(.*)$/);
+    if (ul || ol) {
+      flushP(); const t = ul ? 'ul' : 'ol';
+      if (list !== t) { closeL(); html += `<${t}>`; list = t; }
+      html += `<li>${mdInline((ul || ol)[1])}</li>`;
+    } else if (h) { flushP(); closeL(); html += `<p class="ai-h">${mdInline(h[1])}</p>`; }
+    else if (!line.trim()) { flushP(); closeL(); }
+    else { closeL(); para.push(line); }
+  }
+  flushP(); closeL();
+  return html;
+}
+
+function openAi(id, opener) {
+  const p = postCache.get(id); if (!p) return;
+  closeAi();
+  Object.assign(ai, { post: p, history: [], busy: false, ctrl: null, opener });
+  const root = document.createElement('div');
+  root.id = 'ai-root';
+  root.innerHTML = `<div class="ai-overlay" data-ai-bg></div>
+  <section class="ai-panel" role="dialog" aria-modal="true" aria-labelledby="ai-title">
+    <div class="ai-grab" aria-hidden="true"><span></span></div>
+    <header class="ai-head"><h2 id="ai-title">${ic('sparkle')}<span>ZuZu AI</span></h2><button class="ai-x" data-action="ai-close" aria-label="Close">${ic('close')}</button></header>
+    <div class="ai-scroll" id="ai-scroll">
+      <div class="ai-post">${avatar(p, 'sm')}<div class="b"><div class="m"><b>${esc(p.name)}</b><span>@${esc(p.username)} · ${ago(p.created_at)}</span></div>
+        ${p.text ? `<div class="t">${richText(p.text)}</div>` : ''}${p.image ? `<div class="ai-img">${ic('image')}Image (ZuZu AI only reads the text)</div>` : ''}</div></div>
+      <div class="ai-chips">${aiChips(p).map(([k, l]) => `<button class="ai-chip" data-action="ai-chip" data-key="${k}">${ic('sparkle')}${esc(l)}</button>`).join('')}</div>
+      <div class="ai-msgs" id="ai-msgs" aria-live="polite"></div>
+    </div>
+    <form class="ai-ask" data-form="ai-ask" autocomplete="off">
+      <textarea name="q" rows="1" maxlength="${AI_Q_MAX}" placeholder="Ask anything about this post" aria-label="Ask ZuZu AI about this post" enterkeyhint="send"></textarea>
+      <span class="ai-count"></span>
+      <button class="ai-send" type="submit" aria-label="Ask" title="Ask (Enter)" disabled>${ic('send')}</button>
+    </form>
+    <div class="ai-note">ZuZu AI can make mistakes and can’t browse the web.</div>
+  </section>`;
+  document.body.appendChild(root);
+  document.body.classList.add('ai-open');
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('in')));
+  if (!matchMedia('(hover:none)').matches) $('.ai-ask textarea', root).focus();
+  aiSwipe(root);
+}
+function closeAi() {
+  const root = $('#ai-root'); if (!root) return;
+  if (ai.ctrl) ai.ctrl.abort();
+  const opener = ai.opener;
+  Object.assign(ai, { post: null, history: [], busy: false, ctrl: null, opener: null });
+  root.remove();
+  document.body.classList.remove('ai-open');
+  if (opener && document.body.contains(opener)) opener.focus({ preventScroll: true });
+}
+// Mobile bottom sheet: drag the handle/header down to close.
+function aiSwipe(root) {
+  const panel = $('.ai-panel', root); let y0 = null, dy = 0;
+  const start = (e) => { if (!matchMedia('(max-width:700px)').matches) return; y0 = e.touches[0].clientY; dy = 0; panel.style.transition = 'none'; };
+  const move = (e) => { if (y0 == null) return; dy = Math.max(0, e.touches[0].clientY - y0); panel.style.transform = `translateY(${dy}px)`; };
+  const end = () => { if (y0 == null) return; y0 = null; panel.style.transition = ''; panel.style.transform = ''; if (dy > 90) closeAi(); };
+  [$('.ai-grab', root), $('.ai-head', root)].forEach(el => { el.addEventListener('touchstart', start, { passive: true }); el.addEventListener('touchmove', move, { passive: true }); el.addEventListener('touchend', end); });
+}
+function aiScroll(force) {
+  const el = $('#ai-scroll'); if (!el) return;
+  if (force || el.scrollHeight - el.scrollTop - el.clientHeight < 120) el.scrollTop = el.scrollHeight;
+}
+function aiSetBusy(b) {
+  const root = $('#ai-root'); if (!root) return;
+  root.classList.toggle('busy', b);
+  $$('.ai-chip', root).forEach(c => c.disabled = b);
+  updateAiAsk($('.ai-ask', root));
+}
+function updateAiAsk(f) {
+  if (!f) return;
+  const ta = f.q, len = [...ta.value].length;
+  ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  const cnt = $('.ai-count', f);
+  cnt.textContent = len > AI_Q_MAX - 50 ? String(AI_Q_MAX - len) : '';
+  cnt.classList.toggle('over', len > AI_Q_MAX);
+  $('.ai-send', f).disabled = ai.busy || !ta.value.trim() || len > AI_Q_MAX;
+}
+
+async function aiSend(body, label) {
+  const post = ai.post;
+  if (!post || ai.busy) return;
+  ai.busy = true; aiSetBusy(true);
+  const msgs = $('#ai-msgs');
+  msgs.insertAdjacentHTML('beforeend', `<div class="ai-q">${esc(label)}</div><div class="ai-a streaming"><div class="ai-md"></div><div class="ai-typing" aria-label="ZuZu AI is typing"><span></span><span></span><span></span></div></div>`);
+  const bubble = msgs.lastElementChild, md = $('.ai-md', bubble);
+  aiScroll(true);
+  const ctrl = ai.ctrl = new AbortController();
+  let text = '', done = null, raf = 0;
+  const paint = () => { raf = 0; md.innerHTML = mdRender(text); aiScroll(); };
+  try {
+    const r = await fetch(`/api/ai/post/${post.id}`, {
+      method: 'POST', credentials: 'same-origin', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ ...body, history: ai.history, lang: navigator.language || 'en' }),
+    });
+    if (!r.ok || !(r.headers.get('content-type') || '').startsWith('text/event-stream')) {
+      let d = {}; try { d = await r.json(); } catch {}
+      throw new Error(d.error || 'ZuZu AI couldn’t answer right now. Please try again.');
+    }
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '', err = null;
+    for (;;) {
+      const { value, done: end } = await reader.read(); if (end) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const ev = buf.slice(0, i); buf = buf.slice(i + 2);
+        const name = (ev.match(/^event: (.*)$/m) || [])[1];
+        let data = null; try { data = JSON.parse((ev.match(/^data: (.*)$/m) || [])[1]); } catch {}
+        if (!data) continue;
+        if (!name && typeof data.t === 'string') { text += data.t; if (!raf) raf = requestAnimationFrame(paint); }
+        else if (name === 'done') done = data;
+        else if (name === 'error') err = data.error;
+      }
+    }
+    if (raf) cancelAnimationFrame(raf);
+    paint();
+    if (err) throw new Error(err);
+    if (!done) throw new Error('The answer was interrupted. Please try again.');
+    if (done.truncated) md.insertAdjacentHTML('beforeend', '<p class="ai-cut">(Answer shortened.)</p>');
+    ai.history.push({ role: 'user', content: label }, { role: 'assistant', content: text });
+    ai.history = ai.history.slice(-12);
+  } catch (e) {
+    if (ctrl.signal.aborted) return;
+    if (raf) cancelAnimationFrame(raf);
+    bubble.classList.add('err');
+    md.innerHTML = (text ? mdRender(text) : '') + `<div class="ai-err" role="alert">${esc(e.message === 'Failed to fetch' ? 'Couldn’t reach ZuZu. Check your connection and try again.' : e.message)}</div>`;
+  } finally {
+    bubble.classList.remove('streaming');
+    if (ai.ctrl === ctrl) {
+      ai.busy = false; ai.ctrl = null; aiSetBusy(false); aiScroll();
+      if (!matchMedia('(hover:none)').matches) $('.ai-ask textarea')?.focus();
+    }
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action^="ai-"]');
+  if (!el) { if (e.target.matches('[data-ai-bg]')) closeAi(); return; }
+  e.preventDefault(); e.stopPropagation();
+  const a = el.dataset.action;
+  if (a === 'ai-open') openAi(+el.dataset.id, el);
+  else if (a === 'ai-close') closeAi();
+  else if (a === 'ai-chip') { const c = aiChips(ai.post).find(x => x[0] === el.dataset.key); if (c) aiSend({ action: c[0] }, c[1]); }
+}, true);
+document.addEventListener('input', (e) => { const f = e.target.closest('form[data-form="ai-ask"]'); if (f) updateAiAsk(f); });
+document.addEventListener('submit', (e) => {
+  const f = e.target; if (f.dataset.form !== 'ai-ask') return;
+  e.preventDefault();
+  const q = f.q.value.trim();
+  if (!q || ai.busy) return;
+  if ([...q].length > AI_Q_MAX) return toast(`Questions can be up to ${AI_Q_MAX} characters`);
+  f.q.value = ''; updateAiAsk(f);
+  aiSend({ question: q }, q);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('#ai-root')) { e.stopImmediatePropagation(); closeAi(); return; }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.closest('form[data-form="ai-ask"]') && e.target.name === 'q') { e.preventDefault(); e.target.form.requestSubmit(); }
 }, true);
 
 // ---------- boot ----------

@@ -74,6 +74,38 @@ both paused while the tab is hidden. Message text is escaped; http(s) URLs are l
 On startup, if there are no DM conversations at all, 3 short demo conversations are added (2 with `demo`).
 The rate limiter is in memory, so it is per server instance and resets on restart.
 
+## ZuZu AI (Ask about a post)
+X/Grok-style AI on every post: a sparkle button labelled "Ask ZuZu AI" at the top-right of each post (feed, thread,
+profiles, search). It opens a right side panel on desktop and a bottom sheet on mobile (drag down / tap outside / Esc
+to close) with the post, quick-action chips (Explain this post, Give context, Summarize the replies, Fact-check,
+Translate to Hindi or Translate to English for Hindi/non-Latin posts) and a free-text box (max 500 characters).
+Follow-up questions keep the conversation in the panel. Answers stream in token by token and are rendered as escaped,
+safe markdown (bold, italics, code, lists, http(s) links only).
+
+Server (`ai.js`): `POST /api/ai/post/:id` (login required) with `{action | question, history, lang}`.
+It builds the context from the post (text, author name + handle, ISO date), the parent post if it is a reply, and up
+to 20 replies, and calls Groq's OpenAI-compatible `POST /chat/completions` with `stream: true`. Responses are
+Server-Sent Events: `data: {"t": "..."}` per token, then `event: done` (`{model, cached, truncated}`) or `event: error`.
+The system prompt defines ZuZu AI (helpful, concise, neutral, answers in the user's language, says when unsure,
+can't browse the web). Post and reply content is untrusted: it goes only in a separate message, as JSON between
+`<<<ZUZU_DATA_<random nonce>>>>` / `<<<END_ZUZU_DATA_<nonce>>>>` markers (marker-like `<<<`/`>>>` in content is
+neutralised), and the system prompt says to treat it as data, never instructions.
+
+Limits: 600 answer tokens (`max_completion_tokens`; +400 headroom for reasoning models such as gpt-oss, which run with
+`reasoning_effort: low` and hidden reasoning), 30 s timeout, 20 requests per user per 10 minutes (429 with a friendly
+message + `Retry-After`; in memory, per instance), questions up to 500 characters. Identical Explain / Give context
+answers (same post, language and model, no history) are cached in memory for 10 minutes and don't count against the
+limit. Groq failures return friendly errors (502/503/504), never upstream details. The service worker never caches `/api/ai`.
+
+Environment:
+
+- `GROQ_API_KEY` — enables the feature. Without it `/api/config` returns `"ai": false`, the button is hidden and the
+  endpoint returns 503; the app runs normally.
+- `GROQ_MODEL` — optional, default `openai/gpt-oss-120b` (Groq retired `llama-3.3-70b-versatile` for
+  non-enterprise accounts on 2026-08-16).
+- `GROQ_BASE_URL` — tests only (points at the mock Groq server in `tests/ai-server.js`).
+- `AI_TIMEOUT_MS`, `AI_RATE_MAX`, `AI_MAX_TOKENS` — optional overrides (defaults 30000, 20, 600).
+
 ## Local commands
     cd /workspace/xclone
     ./start.sh app        # (re)start the app in the background (logs: server.log)
@@ -81,10 +113,13 @@ The rate limiter is in memory, so it is per server instance and resets on restar
     ./start.sh tunnel     # (re)start Cloudflare quick tunnel (logs: tunnel.log, URL in PUBLIC_URL.txt)
     ./start.sh            # both
     node seed.js          # create tables + seed demo data if the DB is empty (needs DATABASE_URL)
-    node tests/api-test.js    # API checks (+ Google flow against a mock token endpoint on :4189)
-    node tests/ui-test.js     # headless Chrome end-to-end flow
+    node tests/api-test.js    # API checks (+ Google flow against a mock token endpoint on :4189,
+                              #  ZuZu AI against a mock Groq server with app instances on :4192/:4193)
+    node tests/ui-test.js     # headless Chrome end-to-end flow (ZuZu AI on :4194/:4195 with the mock;
+                              #  writes screenshots 12-ai-desktop.png / 13-ai-mobile.png)
+    # Run tests with `env -u DATABASE_URL` so only the local DB from .env.local is used.
     node tests/shots.js       # regenerate screenshots/ (logs in as demo; opening DMs marks them read)
 
 ## Files
-server.js (API + static), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
+server.js (API + static), ai.js (ZuZu AI), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
 public/{index.html,style.css,app.js,favicon.svg,sw.js,download/ZuZu.apk}, bin/cloudflared, screenshots/.

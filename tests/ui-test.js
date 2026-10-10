@@ -173,6 +173,8 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await dmShots(browser, await ctx.storageState(), step);
   await downloadUi(browser, errors, step, await ctx.storageState());
   await googleUi(browser, errors, step);
+  console.log('\n  ZuZu AI');
+  await aiUi(browser, errors, step, await ctx.storageState());
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
   await browser.close();
   process.exit(errors.length ? 1 : 0);
@@ -501,4 +503,167 @@ async function dmShots(browser, loggedIn, step) {
   await mp.screenshot({ path: OUT + '/11-dm-mobile.png' });
   await ctx.close(); await m.close();
   step('DM screenshots saved (10-dm-desktop.png, 11-dm-mobile.png)');
+}
+
+// ---------- ZuZu AI: button on posts, panel, streaming chips, follow-ups, mobile bottom sheet ----------
+async function aiUi(browser, errors, step, loggedIn) {
+  const watch = (p) => { p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
+  const must = async (cond, msg) => { if (!(await cond)) throw new Error(msg); };
+  // Main server: button shown exactly when /api/config says ai:true (never clicked here, so no real AI calls).
+  const cfg = await (await fetch(BASE + '/api/config')).json();
+  let c = await browser.newContext({ viewport: { width: 1366, height: 900 }, storageState: loggedIn });
+  let p = await c.newPage(); watch(p);
+  await p.goto(BASE + '/explore'); await p.waitForSelector('#feed .post');
+  const n = await p.$$eval('#feed .post .ai-btn', l => l.length);
+  if (cfg.ai ? n === 0 : n > 0) throw new Error(`main server: ai=${cfg.ai} but ${n} AI buttons`);
+  await c.close();
+  step(`main server (${BASE}): AI button ${cfg.ai ? 'shown' : 'hidden'}, matching /api/config ai=${cfg.ai}`);
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping ZuZu AI UI: needs a local server)');
+
+  const { startMockGroq, startApp } = require('./ai-server');
+  const mock = await startMockGroq({ chunkDelay: 40 });
+  const off = await startApp({ port: 4195 });
+  const on = await startApp({ port: 4194, ai: { baseUrl: mock.url } });
+  const login = async (base, opts) => {
+    const ctx = await browser.newContext(opts);
+    const r = await ctx.request.post(base + '/api/login', { data: { username: 'demo', password: 'demo1234' } });
+    if (!r.ok()) throw new Error('demo login failed');
+    const page = await ctx.newPage(); watch(page);
+    return { ctx, page };
+  };
+  const desktop = { viewport: { width: 1366, height: 900 } };
+  const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+  try {
+    // Not configured: no button anywhere.
+    ({ ctx: c, page: p } = await login(off.url, desktop));
+    for (const path of ['/explore', '/u/priya_codes']) {
+      await p.goto(off.url + path); await p.waitForSelector('#feed .post');
+      if (await p.$('.ai-btn')) throw new Error('AI button shown without GROQ_API_KEY on ' + path);
+    }
+    await p.goto(off.url + '/post/1'); await p.waitForSelector('.focus');
+    if (await p.$('.ai-btn')) throw new Error('AI button shown without GROQ_API_KEY on the thread view');
+    await c.close();
+    step('not configured (ai:false): no AI button in feed, profile or thread');
+
+    // Configured: a button on every post in feed, thread and profile.
+    ({ ctx: c, page: p } = await login(on.url, desktop));
+    const A = p;
+    await A.goto(on.url + '/explore'); await A.waitForSelector('#feed .post .ai-btn');
+    const counts = await A.evaluate(() => [document.querySelectorAll('#feed .post').length, document.querySelectorAll('#feed .post .meta .ai-btn[aria-label="Ask ZuZu AI"] svg').length]);
+    if (!counts[0] || counts[0] !== counts[1]) throw new Error('AI button not on every feed post: ' + counts);
+    const place = await A.evaluate(() => { const post = document.querySelector('#feed .post'), b = post.querySelector('.ai-btn').getBoundingClientRect(), r = post.getBoundingClientRect(), more = post.querySelector('.more').getBoundingClientRect(); return { right: r.right - b.right, top: b.top - r.top, beforeMore: b.right <= more.left + 1 }; });
+    if (place.right > 70 || place.top > 30 || !place.beforeMore) throw new Error('AI button not at the top-right of the post: ' + JSON.stringify(place));
+    await A.goto(on.url + '/u/priya_codes'); await A.waitForSelector('#feed .post');
+    await must(A.evaluate(() => [...document.querySelectorAll('#feed .post')].every(p => p.querySelector('.ai-btn'))), 'AI button missing on profile posts');
+    await A.goto(on.url + '/post/1'); await A.waitForSelector('#replies .post');
+    await must(A.evaluate(() => !!document.querySelector('.focus .head .ai-btn') && [...document.querySelectorAll('#replies .post')].every(p => p.querySelector('.ai-btn'))), 'AI button missing in thread view');
+    step(`configured (ai:true): "Ask ZuZu AI" sparkle at the top-right of every post (${counts[0]} in feed, profile, thread + replies)`);
+
+    // Open the panel from the focused post.
+    const url0 = A.url();
+    await A.click('.focus .ai-btn');
+    await A.waitForSelector('#ai-root.in .ai-panel[role=dialog]');
+    await A.waitForTimeout(350);
+    if (A.url() !== url0) throw new Error('clicking the AI button navigated away');
+    const postText = await A.textContent('.focus .text');
+    await must(A.evaluate((t) => document.querySelector('.ai-post .t').textContent === t, postText), 'panel does not show the post');
+    const chips = await A.$$eval('.ai-chip', l => l.map(x => x.textContent.trim()));
+    for (const label of ['Explain this post', 'Give context', 'Summarize the replies', 'Fact-check']) if (!chips.includes(label)) throw new Error('missing chip ' + label + ': ' + chips);
+    if (!chips.some(l => /^Translate to (Hindi|English)$/.test(l))) throw new Error('missing translate chip: ' + chips);
+    const box = await A.$eval('.ai-panel', e => { const r = e.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, h: r.height, w: r.width }; });
+    if (Math.abs(box.right - 1366) > 1 || box.top !== 0 || box.h !== 900 || box.w !== 440) throw new Error('desktop panel should be a full-height right side panel: ' + JSON.stringify(box));
+    await must(A.evaluate(() => document.activeElement && document.activeElement.matches('.ai-ask textarea')), 'question box not focused on open');
+    step('panel opens as a right side panel on desktop: post + chips (' + chips.join(', ') + ') + question box');
+
+    // Chip -> streamed answer, rendered as safe markdown.
+    await A.click('.ai-chip:has-text("Explain this post")');
+    await A.waitForSelector('.ai-q:has-text("Explain this post")');
+    await A.waitForSelector('.ai-a.streaming .ai-md:not(:empty)');
+    const partial = await A.$eval('.ai-a .ai-md', e => e.textContent.length);
+    await must(A.evaluate(() => [...document.querySelectorAll('.ai-chip')].every(b => b.disabled)), 'chips should be disabled while answering');
+    await A.waitForSelector('.ai-a:not(.streaming)', { timeout: 10000 });
+    const ans = await A.$eval('.ai-a .ai-md', e => ({ text: e.textContent, strong: e.querySelectorAll('strong').length, li: e.querySelectorAll('ul li').length, a: e.querySelector('a') && { href: e.querySelector('a').getAttribute('href'), target: e.querySelector('a').target, rel: e.querySelector('a').rel } }));
+    if (!(partial > 0 && partial < ans.text.length)) throw new Error(`answer did not stream (partial ${partial}, final ${ans.text.length})`);
+    if (!ans.text.includes('Mock answer (turn 1) to action "Explain this post"') || ans.strong !== 1 || ans.li !== 2) throw new Error('markdown not rendered: ' + JSON.stringify(ans));
+    if (!ans.a || ans.a.href !== 'https://example.com/docs' || ans.a.target !== '_blank' || !/noopener/.test(ans.a.rel)) throw new Error('link not rendered safely: ' + JSON.stringify(ans.a));
+    await must(A.evaluate(() => [...document.querySelectorAll('.ai-chip')].every(b => !b.disabled)), 'chips not re-enabled');
+    const ctxMsg = mock.calls.at(-1).body.messages[1].content;
+    if (!ctxMsg.includes(JSON.stringify(postText).slice(1, 30))) throw new Error('post text not sent as context');
+    step(`chip "Explain this post" streams an answer (${partial} -> ${ans.text.length} chars), rendered as markdown (bold, list, safe link)`);
+    await A.screenshot({ path: OUT + '/12-ai-desktop.png' });
+    step('screenshot 12-ai-desktop.png');
+
+    // Follow-up keeps the conversation.
+    await A.fill('.ai-ask textarea', 'Is this a good idea for beginners?');
+    await A.press('.ai-ask textarea', 'Enter');
+    await A.waitForSelector('.ai-q:has-text("Is this a good idea for beginners?")');
+    await A.waitForSelector('.ai-a >> nth=1 >> .ai-md:has-text("(turn 2)")');
+    await A.waitForSelector('.ai-a.streaming', { state: 'detached' });
+    const hist = mock.calls.at(-1).body.messages;
+    if (hist.length !== 5 || hist[2].content !== 'Explain this post' || hist[3].role !== 'assistant' || !hist[3].content.includes('Mock answer')) throw new Error('follow-up did not send the conversation history');
+    if (await A.$eval('.ai-ask textarea', e => e.value) !== '') throw new Error('question box not cleared');
+    step('follow-up question answered in the same panel (history sent)');
+
+    // Untrusted output is escaped.
+    await A.fill('.ai-ask textarea', 'MOCK_XSS please'); await A.press('.ai-ask textarea', 'Enter');
+    await A.waitForSelector('.ai-a >> nth=2 >> .ai-md:has-text("is fine")');
+    await A.waitForSelector('.ai-a.streaming', { state: 'detached' });
+    const x = await A.evaluate(() => { const md = document.querySelectorAll('.ai-a .ai-md')[2]; return { bad: md.querySelectorAll('img,script').length, links: [...md.querySelectorAll('a')].map(a => a.getAttribute('href')), text: md.textContent, xss: window.__aiXss }; });
+    if (x.bad || x.xss || x.links.length || !x.text.includes('<img src=x onerror=')) throw new Error('AI answer not escaped: ' + JSON.stringify(x));
+    step('HTML/script/javascript: links in an answer are shown as text, nothing executes');
+
+    // Friendly error. (Chrome logs the expected 502 response to the console; that one entry is not a JS error.)
+    const nErr = errors.length;
+    await A.fill('.ai-ask textarea', 'MOCK_HTTP_500'); await A.press('.ai-ask textarea', 'Enter');
+    await A.waitForSelector('.ai-a.err .ai-err:has-text("ZuZu AI couldn’t answer right now")');
+    await A.waitForTimeout(200);
+    const extra = errors.splice(nErr);
+    errors.push(...extra.filter(e => !/status of 502 \(Bad Gateway\)/.test(e)));
+    if (extra.length - (errors.length - nErr) !== 1) throw new Error('expected exactly one logged 502: ' + extra.join(' | '));
+    step('Groq error shows a friendly message in the panel');
+
+    // Question length cap in the UI.
+    await A.fill('.ai-ask textarea', 'x'.repeat(600));
+    if ((await A.$eval('.ai-ask textarea', e => e.value.length)) !== 500) throw new Error('question box not capped at 500');
+    await A.fill('.ai-ask textarea', '');
+
+    // Escape closes and returns focus.
+    await A.keyboard.press('Escape');
+    await A.waitForSelector('#ai-root', { state: 'detached' });
+    await must(A.evaluate(() => document.activeElement && document.activeElement.matches('.focus .ai-btn')), 'focus not returned to the AI button');
+    await must(A.evaluate(() => document.body.style.overflow !== 'hidden' && !document.body.classList.contains('ai-open')), 'page scroll not restored');
+    step('Escape closes the panel and returns focus to the button');
+    // Opening from the feed, then navigating closes the panel.
+    await A.goto(on.url + '/explore'); await A.waitForSelector('#feed .post .ai-btn');
+    await A.locator('#feed .post .ai-btn').first().click(); await A.waitForSelector('#ai-root.in');
+    await A.click('#ai-root [data-ai-bg]', { position: { x: 100, y: 100 } });
+    await A.waitForSelector('#ai-root', { state: 'detached' });
+    if (!A.url().endsWith('/explore')) throw new Error('feed click on AI button navigated');
+    step('feed: button opens the panel without opening the post; clicking outside closes it');
+    await c.close();
+
+    // Mobile bottom sheet.
+    const { ctx: m, page: M } = await login(on.url, mobile);
+    await M.goto(on.url + '/home'); await M.waitForSelector('#feed .post .ai-btn');
+    await M.locator('#feed .post .ai-btn').first().tap();
+    await M.waitForSelector('#ai-root.in .ai-panel'); await M.waitForTimeout(350);
+    const sheet = await M.evaluate(() => { const r = document.querySelector('.ai-panel').getBoundingClientRect(), a = document.querySelector('.ai-ask').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, w: r.width, h: r.height, radius: getComputedStyle(document.querySelector('.ai-panel')).borderTopLeftRadius, grab: getComputedStyle(document.querySelector('.ai-grab')).display, askBottom: a.bottom }; });
+    if (sheet.w !== 390 || Math.abs(sheet.bottom - 844) > 1 || sheet.top < 60 || sheet.top > 200 || sheet.radius === '0px' || sheet.grab === 'none' || sheet.askBottom > 844) throw new Error('mobile panel is not a bottom sheet: ' + JSON.stringify(sheet));
+    step('mobile: panel is a bottom sheet (' + Math.round(sheet.h) + 'px tall, rounded, drag handle)');
+    await M.locator('.ai-chip').first().tap();
+    await M.waitForSelector('.ai-a.streaming .ai-md:not(:empty)');
+    await M.waitForSelector('.ai-a:not(.streaming) .ai-md:has-text("Mock answer")', { timeout: 10000 });
+    await M.fill('.ai-ask textarea', 'Who wrote it?'); await M.locator('.ai-send').tap();
+    await M.waitForSelector('.ai-a >> nth=1 >> .ai-md:has-text("(turn 2)")');
+    await M.waitForSelector('.ai-a.streaming', { state: 'detached' });
+    step('mobile: chip streams an answer and a follow-up works');
+    await M.screenshot({ path: OUT + '/13-ai-mobile.png' });
+    step('screenshot 13-ai-mobile.png');
+    await M.locator('[data-ai-bg]').tap({ position: { x: 195, y: 30 } });
+    await M.waitForSelector('#ai-root', { state: 'detached' });
+    step('mobile: tapping outside the sheet closes it');
+    await m.close();
+  } finally {
+    on.child.kill(); off.child.kill(); mock.srv.close();
+  }
 }

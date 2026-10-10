@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const path = require('path');
 const db = require('./db');
 const google = require('./google-auth');
+const ai = require('./ai');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -104,7 +105,7 @@ app.get('/api/me', h(async (req, res) => {
 }));
 
 // ---------- Continue with Google (OAuth 2.0 authorization code flow) ----------
-app.get('/api/config', (req, res) => res.json({ google: google.enabled() }));
+app.get('/api/config', (req, res) => res.json({ google: google.enabled(), ai: ai.enabled() }));
 
 const G_COOKIE = 'g_oauth';
 const gCookieOpts = (req) => ({ httpOnly: true, sameSite: 'lax', secure: google.redirectUri(req).startsWith('https:'), path: '/auth/google' });
@@ -604,6 +605,9 @@ app.delete('/api/dm/messages/:id', h(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- ZuZu AI (Ask about a post; Groq, streamed as SSE) ----------
+ai.register(app, { auth, h, db, postIdParam });
+
 app.get('/healthz', h(async (req, res) => {
   try {
     await db.query('SELECT 1');
@@ -614,6 +618,7 @@ app.get('/healthz', h(async (req, res) => {
 }));
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
+  if (res.headersSent) { console.error(err); return res.end(); }
   if (err instanceof multer.MulterError) {
     return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Image must be under 5 MB' : err.message });
   }
