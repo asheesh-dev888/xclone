@@ -39,7 +39,7 @@ async function seed(client) {
   const ids = {};
   const T0 = Date.now();
   for (const [i, [u, n, b, l]] of users.entries()) {
-    ids[u] = (await one('INSERT INTO users(username,name,password_hash,bio,location,created_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    ids[u] = (await one('INSERT INTO users(username,name,password_hash,bio,location,created_at,is_demo) VALUES ($1,$2,$3,$4,$5,$6,TRUE) RETURNING id',
       [u, n, hash, b, l, T0 - (400 - i * 20) * 864e5])).id;
   }
   const pid = {};
@@ -123,7 +123,9 @@ async function seedDMs(client) {
   if (made) console.log('Seeded', made, 'demo DM conversations');
   return made > 0;
 }
-module.exports = { seed, seedDMs };
+// Seeded usernames (flagged is_demo; schema.sql backfills the same list once).
+const DEMO_USERNAMES = users.map(u => u[0]);
+module.exports = { seed, seedDMs, DEMO_USERNAMES };
 
 // `node seed.js`: create schema + seed if the database is empty (same as server startup, without listening).
 if (require.main === module) {

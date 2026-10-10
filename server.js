@@ -8,6 +8,7 @@ const path = require('path');
 const db = require('./db');
 const google = require('./google-auth');
 const ai = require('./ai');
+const admin = require('./admin');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -101,7 +102,9 @@ app.get('/api/me', h(async (req, res) => {
   const { c } = await db.get('SELECT COUNT(*)::int c FROM notifications WHERE user_id=$1 AND NOT read', [req.user.id]);
   const dm = await db.get(`SELECT COUNT(*)::int n FROM dm_members mb JOIN dm_messages m ON m.conversation_id=mb.conversation_id
     WHERE mb.user_id=$1 AND m.sender_id<>$1 AND m.created_at>mb.last_read_at`, [req.user.id]);
-  res.json({ user: publicUser(req.user), unread: c, dm_unread: dm.n });
+  const out = { user: publicUser(req.user), unread: c, dm_unread: dm.n };
+  if (admin.isAdminUser(req.user)) out.admin = true; // only admins see the flag (and the Admin nav item)
+  res.json(out);
 }));
 
 // ---------- Continue with Google (OAuth 2.0 authorization code flow) ----------
@@ -607,6 +610,9 @@ app.delete('/api/dm/messages/:id', h(async (req, res) => {
 
 // ---------- ZuZu AI (Ask about a post; Groq, streamed as SSE) ----------
 ai.register(app, { auth, h, db, postIdParam });
+
+// ---------- Admin dashboard (ADMIN_USERNAMES / ADMIN_TOKEN; 404 for everyone else) ----------
+admin.register(app, { h, db, root: ROOT });
 
 app.get('/healthz', h(async (req, res) => {
   try {

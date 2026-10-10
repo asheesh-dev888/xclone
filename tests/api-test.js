@@ -72,6 +72,7 @@ function client() {
   await downloadTests();
   await aiTests();
   await googleTests();
+  await adminTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
 
@@ -473,5 +474,167 @@ async function aiTests() {
     ok(bypass.test('/api/ai/post/1') && /\/api\/ai/.test(sw), 'service worker never caches /api/ai');
   } finally {
     on.child.kill(); off.child.kill(); mock.srv.close();
+  }
+}
+
+// ---------- Admin dashboard (ADMIN_USERNAMES / ADMIN_TOKEN) ----------
+async function adminTests() {
+  console.log('\n  Admin dashboard');
+  const A = require('../admin');
+  // Unit: IST day boundaries (UTC+05:30) regardless of the server's timezone.
+  const last = Date.UTC(2026, 9, 10, 18, 29, 59, 999); // 2026-10-10 23:59:59.999 IST
+  ok(A.istDateString(A.istDayNumber(last)) === '2026-10-10' && A.istDateString(A.istDayNumber(last + 1)) === '2026-10-11', 'IST day flips at 18:30 UTC (23:59:59.999 IST -> 10 Oct, 00:00 IST -> 11 Oct)');
+  const w = A.windows(Date.UTC(2026, 9, 10, 2, 0)); // 07:30 IST on 10 Oct (still 10 Oct in UTC)
+  ok(w.todayStart === Date.UTC(2026, 9, 9, 18, 30) && w.yesterdayStart === Date.UTC(2026, 9, 8, 18, 30), 'today/yesterday start at 00:00 IST');
+  const w2 = A.windows(Date.UTC(2026, 9, 9, 20, 0)); // 01:30 IST on 10 Oct, but 9 Oct in UTC
+  ok(w2.todayStart === Date.UTC(2026, 9, 9, 18, 30), '01:30 IST counts as the IST day, not the UTC day');
+  ok(w.last7Start === Date.UTC(2026, 9, 3, 18, 30) && w.last30Start === Date.UTC(2026, 8, 10, 18, 30), 'last 7 / 30 days = today + previous 6 / 29 IST days');
+  const seedMod = require('../seed');
+  const schema = require('fs').readFileSync(require('path').join(__dirname, '..', 'schema.sql'), 'utf8');
+  ok(seedMod.DEMO_USERNAMES.length === 8 && seedMod.DEMO_USERNAMES.every(u => schema.includes(`'${u}'`)), 'schema.sql demo backfill lists every seed.js username');
+
+  // Main server: no admin access for logged-out users.
+  let r = await fetch(BASE + '/api/admin/stats'); ok(r.status === 404, 'main server: logged-out GET /api/admin/stats -> 404');
+  const sw = await (await fetch(BASE + '/sw.js')).text();
+  const bypass = new Function('return ' + sw.match(/const BYPASS = (\/.*\/);/)[1])();
+  ok(bypass.test('/api/admin/stats') && bypass.test('/admin') && /startsWith\('\/api\/admin'\)/.test(sw), 'service worker never caches /api/admin (or /admin)');
+
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) { console.log('  (skipping admin server tests: needs a local server)'); return; }
+  const { startApp } = require('./ai-server');
+  const { localDbUrl } = require('./google-server');
+  const crypto = require('crypto');
+  const rnd = Math.floor(Math.random() * 1e6);
+  const TOKEN = crypto.randomBytes(32).toString('hex');
+  const adminName = 'AdmBoss' + rnd;
+  const on = await startApp({ port: 4196, env: { ADMIN_USERNAMES: ` someone_else , ${adminName.toLowerCase()} `, ADMIN_TOKEN: TOKEN } });
+  const off = await startApp({ port: 4197, env: { ADMIN_USERNAMES: '', ADMIN_TOKEN: '' } });
+  const { Client } = require('pg');
+  const pg = new Client({ connectionString: localDbUrl() }); await pg.connect();
+  const made = [];
+  const mk = (base) => {
+    let cookie = '';
+    return async (method, p, body, headers = {}) => {
+      const hd = { ...headers }; if (cookie) hd.cookie = cookie;
+      let b; if (body instanceof FormData) b = body; else if (body) { hd['content-type'] = 'application/json'; b = JSON.stringify(body); }
+      const res = await fetch(base + p, { method, headers: hd, body: b });
+      const sc = res.headers.get('set-cookie'); if (sc && /sid=/.test(sc)) cookie = sc.split(';')[0];
+      const text = await res.text(); let data = {}; try { data = JSON.parse(text); } catch {}
+      return { status: res.status, data, text, headers: res.headers };
+    };
+  };
+  const bearer = (t) => ({ authorization: 'Bearer ' + t });
+  const stats = async (q = '') => (await fetch(on.url + '/api/admin/stats' + q, { headers: bearer(TOKEN) })).json();
+  try {
+    // logged out
+    const anon = mk(on.url);
+    r = await anon('GET', '/api/admin/stats'); ok(r.status === 404 && r.data.error === 'Not found', 'logged out: /api/admin/stats -> 404');
+    r = await anon('GET', '/admin'); ok(r.status === 404 && !/app\.js/.test(r.text), 'logged out: /admin page -> 404');
+    // non-admin
+    const plain = mk(on.url);
+    r = await plain('POST', '/api/signup', { username: 'admplain' + rnd, password: 'secret123' }); made.push('admplain' + rnd);
+    r = await plain('GET', '/api/admin/stats'); ok(r.status === 404, 'non-admin user: /api/admin/stats -> 404');
+    r = await plain('GET', '/admin'); ok(r.status === 404, 'non-admin user: /admin page -> 404');
+    r = await plain('GET', '/api/me'); ok(r.data.user && r.data.admin === undefined, 'non-admin: /api/me has no admin flag');
+    r = await plain('GET', '/api/admin/stats', null, bearer('nope')); ok(r.status === 404, 'non-admin + wrong token -> 404');
+    // admin username (case-insensitive)
+    const adm = mk(on.url);
+    r = await adm('POST', '/api/signup', { username: adminName, password: 'secret123', name: 'Admin Boss' }); made.push(adminName);
+    ok(r.status === 200, 'signed up admin ' + adminName + ' (listed in lower case)');
+    r = await adm('GET', '/api/me'); ok(r.data.admin === true, 'admin: /api/me -> admin: true');
+    r = await adm('GET', '/api/admin/stats');
+    ok(r.status === 200 && typeof r.data.users.total === 'number' && r.data.timezone === 'Asia/Kolkata', 'admin username: GET /api/admin/stats -> 200');
+    ok(/no-store/.test(r.headers.get('cache-control') || ''), 'stats are Cache-Control: no-store');
+    ok(r.data.ai_requests_today === undefined, 'AI requests not reported (not tracked)');
+    r = await adm('GET', '/admin'); ok(r.status === 200 && /app\.js/.test(r.text) && /no-store/.test(r.headers.get('cache-control') || ''), 'admin username: /admin page -> 200 (no-store)');
+    r = await adm('GET', '/api/admin/other'); ok(r.status === 404, 'unknown /api/admin path -> 404');
+    // bearer token
+    r = await anon('GET', '/api/admin/stats', null, bearer(TOKEN)); ok(r.status === 200 && r.data.users, 'bearer ADMIN_TOKEN works without login');
+    r = await anon('GET', '/api/admin/stats', null, { authorization: 'bearer ' + TOKEN }); ok(r.status === 200, 'Bearer scheme is case-insensitive');
+    r = await anon('GET', '/api/admin/stats', null, bearer(TOKEN.slice(0, -1) + (TOKEN.endsWith('a') ? 'b' : 'a'))); ok(r.status === 404, 'wrong token (1 char off) -> 404');
+    r = await anon('GET', '/api/admin/stats', null, bearer(TOKEN + 'x')); ok(r.status === 404, 'wrong token (longer) -> 404');
+    r = await anon('GET', '/api/admin/stats', null, bearer('')); ok(r.status === 404, 'empty bearer -> 404');
+    r = await anon('GET', '/api/admin/stats', null, { authorization: TOKEN }); ok(r.status === 404, 'token without Bearer scheme -> 404');
+    r = await anon('GET', '/admin', null, bearer(TOKEN)); ok(r.status === 404, 'token does not open the /admin page (API only)');
+    // token / usernames off when unset
+    r = await fetch(off.url + '/api/admin/stats', { headers: bearer(TOKEN) }); ok(r.status === 404, 'ADMIN_TOKEN unset: token access off (404)');
+    r = await fetch(off.url + '/api/admin/stats', { headers: bearer('') }); ok(r.status === 404, 'ADMIN_TOKEN unset: empty bearer -> 404');
+    const offAdm = mk(off.url);
+    r = await offAdm('POST', '/api/login', { username: adminName, password: 'secret123' });
+    r = await offAdm('GET', '/api/admin/stats'); ok(r.status === 404, 'ADMIN_USERNAMES unset: nobody is admin');
+
+    // Demo users: flagged and excluded
+    const demoRows = (await pg.query('SELECT lower(username) u, is_demo FROM users WHERE lower(username) = ANY($1)', [seedMod.DEMO_USERNAMES])).rows;
+    ok(demoRows.length === 8 && demoRows.every(x => x.is_demo), 'all 8 seeded accounts are flagged is_demo');
+    let s = await stats();
+    ok(s.users.total === s.users.real + s.users.demo && s.users.demo >= 8, `users: total ${s.users.total} = real ${s.users.real} + demo ${s.users.demo}`);
+    ok(!s.latest_signups.some(u => seedMod.DEMO_USERNAMES.includes(u.username.toLowerCase())), 'seeded demo accounts never in latest sign-ups');
+
+    // IST counting incl. date boundaries: insert users at exact IST edges.
+    const nowMs = Date.now();
+    const W = A.windows(nowMs);
+    if (nowMs - W.todayStart < 120e3) { await new Promise(res => setTimeout(res, 125e3 - (nowMs - W.todayStart))); }
+    const base0 = await stats();
+    const T = A.windows(Date.now());
+    const ins = async (name, created, { demo = false, google = null } = {}) => {
+      made.push(name);
+      await pg.query('INSERT INTO users(username,name,password_hash,created_at,is_demo,google_id) VALUES ($1,$2,NULL,$3,$4,$5)', [name, 'Edge ' + name, created, demo, google]);
+    };
+    const n = (k) => `ist${k}${rnd}`;
+    await ins(n('t0'), T.todayStart);                     // 00:00:00.000 IST today (still yesterday in UTC)
+    await ins(n('y9'), T.todayStart - 1);                 // 23:59:59.999 IST yesterday
+    await ins(n('y0'), T.yesterdayStart);                 // 00:00 IST yesterday
+    await ins(n('d2'), T.yesterdayStart - 1);             // last ms of the day before yesterday
+    await ins(n('d6'), A.istDayStart(T.today - 6));       // first ms of the 7-day window
+    await ins(n('d7'), A.istDayStart(T.today - 6) - 1);   // just outside 7 days
+    await ins(n('d29'), A.istDayStart(T.today - 29));     // first ms of the 30-day window
+    await ins(n('d30'), A.istDayStart(T.today - 29) - 1); // just outside 30 days
+    await ins(n('demo'), Date.now(), { demo: true });     // demo account created now: excluded
+    s = await stats();
+    const d = (k) => s.signups[k] - base0.signups[k];
+    ok(d('today') === 1, 'today (IST) +1: user at 00:00:00.000 IST counted today, demo excluded');
+    ok(d('yesterday') === 2, 'yesterday (IST) +2: 00:00 and 23:59:59.999 IST');
+    ok(d('last_7_days') === 5, 'last 7 days +5 (boundary user just outside excluded)');
+    ok(d('last_30_days') === 7, 'last 30 days +7 (boundary user just outside excluded)');
+    ok(s.users.total - base0.users.total === 9 && s.users.real - base0.users.real === 8 && s.users.demo - base0.users.demo === 1, 'totals: +9 users = +8 real, +1 demo');
+    const ser = s.daily_signups, ser0 = base0.daily_signups;
+    ok(ser.length === 30 && ser[29].date === A.istDateString(T.today) && ser[0].date === A.istDateString(T.today - 29) && s.today === ser[29].date, `30-day series ${ser[0].date} .. ${ser[29].date} (IST)`);
+    const sd = (i) => ser[i].count - ser0[i].count;
+    ok(sd(29) === 1 && sd(28) === 2 && sd(27) === 1 && sd(23) === 1 && sd(22) === 1 && sd(0) === 1 && ser.reduce((a, x, i) => a + x.count - ser0[i].count, 0) === 7, 'daily series buckets by IST day (today 1, yesterday 2, …)');
+    ok(s.daily_signups.reduce((a, x) => a + x.count, 0) === s.signups.last_30_days, 'series sum = last 30 days');
+    ok(!s.latest_signups.some(u => u.username === n('demo')), 'demo user created now not in latest sign-ups');
+
+    // Latest sign-ups + Google flag + since
+    const since = Date.now();
+    await new Promise(res => setTimeout(res, 5));
+    const nu = mk(on.url);
+    r = await nu('POST', '/api/signup', { username: 'admnew' + rnd, password: 'secret123', name: 'New Person' }); made.push('admnew' + rnd);
+    await ins('admgoog' + rnd, Date.now() + 1, { google: 'g-adm-' + rnd });
+    await ins('admdemo' + rnd, Date.now() + 2, { demo: true });
+    s = await stats('?since=' + since);
+    ok(s.latest_signups.length === 20 && s.latest_signups[0].username === 'admgoog' + rnd && s.latest_signups[0].google === true, 'latest sign-ups: 20, newest first, Google flag');
+    const l1 = s.latest_signups[1];
+    ok(l1.username === 'admnew' + rnd && l1.name === 'New Person' && l1.google === false && typeof l1.created_at === 'number' && l1.profile_url === '/u/admnew' + rnd, 'latest sign-up has username, name, created_at, google, profile link');
+    ok(s.since && s.since.since === since && s.since.count === 2 && s.since.users.map(u => u.username).join() === `admgoog${rnd},admnew${rnd}`, '?since: count 2 + list (demo excluded)');
+    s = await stats('?since=' + (Date.now() + 60e3)); ok(s.since.count === 0 && s.since.users.length === 0, '?since in the future -> 0');
+    s = await stats(); ok(s.since === undefined, 'no since -> no since block');
+    r = await fetch(on.url + '/api/admin/stats?since=abc', { headers: bearer(TOKEN) }); ok(r.status === 400, '?since=abc -> 400');
+    r = await fetch(on.url + '/api/admin/stats?since=-5', { headers: bearer(TOKEN) }); ok(r.status === 400, '?since=-5 -> 400');
+
+    // posts / DMs / active users today
+    const b0 = await stats();
+    const fd = new FormData(); fd.append('text', 'admin stats post');
+    r = await nu('POST', '/api/posts', fd);
+    const rf = new FormData(); rf.append('text', 'admin stats reply'); rf.append('parent_id', r.data.post.id);
+    await plain('POST', '/api/posts', rf);
+    r = await adm('POST', '/api/dm/conversations', { username: 'demo' });
+    const dmf = new FormData(); dmf.append('text', 'hi from admin test');
+    await adm('POST', `/api/dm/conversations/${r.data.conversation.id}/messages`, dmf);
+    const b1 = await stats();
+    ok(b1.posts.total - b0.posts.total === 2 && b1.posts.today - b0.posts.today === 2 && b1.posts.replies_today - b0.posts.replies_today === 1, 'posts total/today +2 (incl. 1 reply)');
+    ok(b1.dms.total - b0.dms.total === 1 && b1.dms.today - b0.dms.today === 1, 'DMs total/today +1');
+    ok(b1.active_users_today - b0.active_users_today === 3, 'active users today +3 (poster, replier, DM sender)');
+  } finally {
+    await pg.query('DELETE FROM users WHERE lower(username) = ANY($1)', [made.map(x => x.toLowerCase())]).catch(() => {});
+    await pg.end(); on.child.kill(); off.child.kill();
   }
 }

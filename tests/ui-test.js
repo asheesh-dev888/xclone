@@ -175,6 +175,8 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await googleUi(browser, errors, step);
   console.log('\n  ZuZu AI');
   await aiUi(browser, errors, step, await ctx.storageState());
+  console.log('\n  Admin dashboard');
+  await adminUi(browser, errors, step, await ctx.storageState());
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
   await browser.close();
   process.exit(errors.length ? 1 : 0);
@@ -666,4 +668,87 @@ async function aiUi(browser, errors, step, loggedIn) {
   } finally {
     on.child.kill(); off.child.kill(); mock.srv.close();
   }
+}
+
+// ---------- Admin dashboard (/admin) ----------
+async function adminUi(browser, errors, step, loggedIn) {
+  const watch = (p) => { p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
+  // Main server has no ADMIN_USERNAMES for demo: no Admin nav item.
+  let c = await browser.newContext({ viewport: { width: 1366, height: 900 }, storageState: loggedIn });
+  let p = await c.newPage(); watch(p);
+  await p.goto(BASE + '/home'); await p.waitForSelector('.nav .nav-item');
+  if (await p.$('.nav a[href="/admin"]')) throw new Error('main server: non-admin sees the Admin nav item');
+  await c.close();
+  step('non-admin: no Admin item in the nav');
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping admin UI: needs a local server)');
+
+  const { startApp } = require('./ai-server');
+  const app = await startApp({ port: 4198, env: { ADMIN_USERNAMES: 'DEMO', ADMIN_TOKEN: '' } });
+  const login = async (user, opts = {}) => {
+    const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, ...opts });
+    const r = await ctx.request.post(app.url + '/api/login', { data: { username: user, password: 'demo1234' } });
+    if (!r.ok()) throw new Error(user + ' login failed');
+    const page = await ctx.newPage(); watch(page);
+    return { ctx, page };
+  };
+  try {
+    // Non-admin on the admin-enabled server: no nav item, page + API 404.
+    let { ctx, page } = await login('priya_codes');
+    await page.goto(app.url + '/home'); await page.waitForSelector('.nav .nav-item');
+    if (await page.$('a[href="/admin"]')) throw new Error('non-admin sees an Admin link');
+    if ((await ctx.request.get(app.url + '/admin')).status() !== 404) throw new Error('non-admin /admin is not 404');
+    if ((await ctx.request.get(app.url + '/api/admin/stats')).status() !== 404) throw new Error('non-admin /api/admin/stats is not 404');
+    await ctx.close();
+    step('non-admin on admin-enabled server: no nav item, /admin + API -> 404');
+
+    // Admin: nav item -> dashboard.
+    ({ ctx, page } = await login('demo'));
+    await page.goto(app.url + '/home'); await page.waitForSelector('.nav a.nav-item[href="/admin"]');
+    if (!(await page.textContent('.nav a.nav-item[href="/admin"]')).includes('Admin')) throw new Error('Admin nav label missing');
+    await page.click('.nav a.nav-item[href="/admin"]');
+    await page.waitForURL('**/admin');
+    await page.waitForSelector('.stat-grid .stat-card');
+    const api = await (await ctx.request.get(app.url + '/api/admin/stats')).json();
+    const cards = await page.$$eval('.stat-card', l => l.map(e => e.dataset.stat));
+    for (const k of ['total', 'today', 'yesterday', 'last7', 'last30', 'active', 'posts', 'dms']) if (!cards.includes(k)) throw new Error('missing stat card ' + k);
+    const total = await page.textContent('[data-stat=total] .stat-value');
+    if (total.replace(/\D/g, '') !== String(api.users.total)) throw new Error(`total card ${total} != API ${api.users.total}`);
+    if (!(await page.textContent('[data-stat=total] .stat-sub')).match(/real .* demo/)) throw new Error('real/demo split missing');
+    step(`admin: Admin nav item opens /admin with ${cards.length} stat cards (total ${total} matches the API)`);
+    const bars = await page.$$eval('#signup-chart .bar-col', l => l.map(e => ({ d: e.dataset.date, n: +e.dataset.count, h: e.querySelector('.bar').getBoundingClientRect().height })));
+    if (bars.length !== 30) throw new Error('chart has ' + bars.length + ' bars');
+    if (bars.map(b => b.d).join() !== api.daily_signups.map(x => x.date).join() || bars.some((b, i) => b.n !== api.daily_signups[i].count)) throw new Error('chart does not match daily_signups');
+    const maxBar = bars.reduce((a, b) => b.n > a.n ? b : a);
+    if (maxBar.n > 0 && maxBar.h < 50) throw new Error('tallest bar not drawn: ' + JSON.stringify(maxBar));
+    if (bars.some(b => b.n === 0 && b.h > 0)) throw new Error('zero days drawn with height');
+    step('chart: 30 daily bars (CSS, no libraries) matching the API');
+    const rows = await page.$$eval('.admin-table tbody tr', l => l.length);
+    if (rows !== Math.min(20, api.latest_signups.length)) throw new Error('table rows ' + rows);
+    const href = await page.getAttribute('.admin-table tbody tr a.adm-user', 'href');
+    if (href !== '/u/' + api.latest_signups[0].username) throw new Error('first row link ' + href);
+    step(`latest sign-ups table: ${rows} rows linking to profiles`);
+    const before = await page.textContent('#admin-updated');
+    await page.waitForTimeout(1100);
+    const [resp] = await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/admin/stats')), page.click('[data-action="admin-refresh"]')]);
+    if (resp.status() !== 200) throw new Error('refresh failed');
+    await page.waitForFunction((b) => document.querySelector('#admin-updated').textContent !== b, before);
+    step('refresh button reloads the stats (' + (await page.textContent('#admin-updated')) + ')');
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: OUT + '/14-admin.png', fullPage: true });
+    step('screenshot 14-admin.png');
+    await page.click('.admin-table tbody tr a.adm-user');
+    await page.waitForURL('**' + href); await page.waitForSelector('.profile, #feed');
+    step('profile link opens the user profile');
+    await ctx.close();
+
+    // Mobile: fits the screen, Admin reachable from the top bar.
+    ({ ctx, page } = await login('demo', { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }));
+    await page.goto(app.url + '/home'); await page.waitForSelector('.mobile-top a.mobile-admin');
+    await page.tap('.mobile-top a.mobile-admin'); await page.waitForURL('**/admin');
+    await page.waitForSelector('#signup-chart .bar-col');
+    const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cols: getComputedStyle(document.querySelector('.stat-grid')).gridTemplateColumns.split(' ').length }));
+    if (m.sw > 390 || m.cols !== 2) throw new Error('mobile admin layout: ' + JSON.stringify(m));
+    step('mobile: Admin icon in the top bar; 2-column cards, no horizontal overflow');
+    await ctx.close();
+  } finally { app.child.kill(); }
 }

@@ -106,6 +106,36 @@ Environment:
 - `GROQ_BASE_URL` — tests only (points at the mock Groq server in `tests/ai-server.js`).
 - `AI_TIMEOUT_MS`, `AI_RATE_MAX`, `AI_MAX_TOKENS` — optional overrides (defaults 30000, 20, 600).
 
+## Admin dashboard (private)
+`/admin` shows sign-up and activity stats; `GET /api/admin/stats` returns them as JSON. Both return a plain
+**404** to everyone without access (logged out, non-admins, wrong/missing token), so the dashboard isn't discoverable.
+
+- `ADMIN_USERNAMES` — comma-separated usernames (case-insensitive, `@` optional). These logged-in users get an
+  "Admin" item in the left nav (chart icon in the mobile top bar), the `/admin` page and the API. `/api/me` returns
+  `admin: true` only for them.
+- `ADMIN_TOKEN` — long random string (`openssl rand -hex 32`). `Authorization: Bearer <ADMIN_TOKEN>` can read
+  `GET /api/admin/stats` without logging in (not the page). Compared in constant time (SHA-256 + `timingSafeEqual`).
+  Unset/empty = token access off.
+
+All dates are **Asia/Kolkata (IST, UTC+05:30)**: "today" starts at 00:00 IST, "last 7/30 days" = today plus the
+previous 6/29 IST days. Response (all `Cache-Control: no-store`):
+
+    users            {total, real, demo, google}           demo = seeded accounts (users.is_demo)
+    signups          {today, yesterday, last_7_days, last_30_days}   real users only
+    daily_signups    [{date: "YYYY-MM-DD", count}] x 30, oldest first, last = today (IST)
+    latest_signups   20 newest real users: {id, username, name, created_at (ms), google, profile_url}
+    posts            {total, today, replies_today}           posts + replies (reposts not counted)
+    dms              {total, today}                         DM messages
+    active_users_today                                      posted/replied/reposted, liked or sent a DM today
+    since            {since, count, users[], truncated}     only with ?since=<epoch ms>: real users created after it (list max 500)
+
+`curl -H "Authorization: Bearer $ADMIN_TOKEN" https://zuzu-app.onrender.com/api/admin/stats?since=1760000000000`
+
+AI requests aren't counted (ZuZu AI only keeps an in-memory rate-limit window, not a daily log), so they're left out.
+Seeded demo accounts are flagged by the idempotent `users.is_demo` column: `schema.sql` adds it once and backfills the
+`seed.js` usernames (demo, akhil, priya_codes, rahul_cricket, spacenerd, foodie_arjun, newsbot, design_ananya;
+password accounts only), and `seed.js` sets it for new seeds. The service worker never caches `/api/admin` or `/admin`.
+
 ## Local commands
     cd /workspace/xclone
     ./start.sh app        # (re)start the app in the background (logs: server.log)
@@ -114,12 +144,13 @@ Environment:
     ./start.sh            # both
     node seed.js          # create tables + seed demo data if the DB is empty (needs DATABASE_URL)
     node tests/api-test.js    # API checks (+ Google flow against a mock token endpoint on :4189,
-                              #  ZuZu AI against a mock Groq server with app instances on :4192/:4193)
+                              #  ZuZu AI against a mock Groq server with app instances on :4192/:4193,
+                              #  admin dashboard with instances on :4196 (admin on) / :4197 (admin off))
     node tests/ui-test.js     # headless Chrome end-to-end flow (ZuZu AI on :4194/:4195 with the mock;
-                              #  writes screenshots 12-ai-desktop.png / 13-ai-mobile.png)
+                              #  writes screenshots 12-ai-desktop.png / 13-ai-mobile.png; admin UI on :4198 -> 14-admin.png)
     # Run tests with `env -u DATABASE_URL` so only the local DB from .env.local is used.
     node tests/shots.js       # regenerate screenshots/ (logs in as demo; opening DMs marks them read)
 
 ## Files
-server.js (API + static), ai.js (ZuZu AI), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
+server.js (API + static), ai.js (ZuZu AI), admin.js (admin dashboard API + /admin access), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
 public/{index.html,style.css,app.js,favicon.svg,sw.js,download/ZuZu.apk}, bin/cloudflared, screenshots/.

@@ -35,6 +35,7 @@ const P = {
   mailFill: 'M1.998 4.499c0-.828.671-1.499 1.5-1.499h17c.828 0 1.5.671 1.5 1.499v2.858l-10 4.545-10-4.547V4.499zm0 5.053V19.5c0 .828.671 1.5 1.5 1.5h17c.828 0 1.5-.672 1.5-1.5V9.554l-10 4.545-10-4.547z',
   send: 'M2.504 21.866l.526-2.108C3.04 19.719 4 15.823 4 12s-.96-7.719-.97-7.757l-.527-2.109L22.236 12 2.504 21.866zM5.981 13c-.072 1.962-.34 3.833-.583 5.183L17.764 12 5.398 5.818c.242 1.349.51 3.221.583 5.183H10v2H5.981z',
   logout: 'M16 13v-2H7V8l-5 4 5 4v-3h9zM20 3h-9c-1.103 0-2 .897-2 2v4h2V5h9v14h-9v-4H9v4c0 1.103.897 2 2 2h9c1.103 0 2-.897 2-2V5c0-1.103-.897-2-2-2z',
+  chart: 'M8.75 21V3h2v18h-2zM18 21V8.5h2V21h-2zM4 21l.004-10h2L6 21H4zm9.248 0v-7h2v7h-2z',
   sparkle: 'M10 2.5l1.95 5.55L17.5 10l-5.55 1.95L10 17.5l-1.95-5.55L2.5 10l5.55-1.95L10 2.5zm0 4.6l-.85 2.05L7.1 10l2.05.85L10 12.9l.85-2.05L12.9 10l-2.05-.85L10 7.1zM18.5 14l.95 2.55L22 17.5l-2.55.95L18.5 21l-.95-2.55L15 17.5l2.55-.95L18.5 14z',
 };
 const ic = (name, cls = 'icon') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true"><path d="${P[name]}"/></svg>`;
@@ -135,6 +136,7 @@ const routes = [
   [/^\/notifications$/, () => viewNotifications()],
   [/^\/messages(?:\/(\d+))?$/, (m) => viewMessages(m[1] ? +m[1] : null)],
   [/^\/search$/, () => viewSearch()],
+  [/^\/admin\/?$/, () => viewAdmin()],
   [/^\/post\/(\d+)$/, (m) => viewPost(m[1])],
   [/^\/u\/([\w.]+)\/(followers|following)$/, (m) => viewFollowList(m[1], m[2])],
   [/^\/u\/([\w.]+)(?:\/(replies|media|likes))?$/, (m) => viewProfile(m[1], m[2] || 'posts')],
@@ -167,6 +169,7 @@ function shell(center, { active = '', layout = '' } = {}) {
   const me = state.me;
   if (layout !== 'dm') state.chat = null;
   document.body.classList.toggle('dm-page', layout === 'dm');
+  document.body.classList.toggle('admin-page', layout === 'admin');
   document.body.classList.remove('dm-chat-open');
   const badge = (key) => key === 'notifications' && state.unread ? `<span class="badge">${state.unread > 99 ? '99+' : state.unread}</span>` : key === 'messages' ? dmBadge() : '';
   const navItem = (href, key, icon, iconOn, label) => `<a class="nav-item ${active === key ? 'active' : ''}" href="${href}" data-link>${ic(active === key && iconOn ? iconOn : icon)}${badge(key)}<span class="lbl">${label}</span></a>`;
@@ -179,19 +182,21 @@ function shell(center, { active = '', layout = '' } = {}) {
       ${navItem('/notifications', 'notifications', 'bell', null, 'Notifications')}
       ${navItem('/messages', 'messages', 'mail', 'mailFill', 'Messages')}
       ${navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
+      ${state.admin ? navItem('/admin', 'admin', 'chart', null, 'Admin') : ''}
       ${navAppLink()}
       <button class="btn btn-primary btn-big" data-action="compose">${ic('feather')}<span class="lbl">Post</span></button>
       <div class="me-chip" data-action="me-menu">${avatar(me)}<div class="who"><div style="font-weight:700">${esc(me.name)}</div><div style="color:var(--muted)">@${esc(me.username)}</div></div><span class="dots">${ic('dots')}</span></div>
     </header>
-    <main class="main ${layout === 'dm' ? 'dm-main' : ''}">
+    <main class="main ${layout === 'dm' ? 'dm-main' : layout === 'admin' ? 'admin-main' : ''}">
       <div class="mobile-top">
         <a href="/u/${esc(me.username)}" data-link>${avatar(me, 'sm')}</a>
         <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}</a>
+        ${state.admin ? `<a class="mobile-admin" href="/admin" data-link aria-label="Admin" title="Admin">${ic('chart')}</a>` : ''}
         <button class="spacer" data-action="logout" aria-label="Log out" title="Log out">${ic('logout')}</button>
       </div>
       <div id="center">${center}</div>
     </main>
-    ${layout === 'dm' ? '' : `<aside class="side">
+    ${layout === 'dm' || layout === 'admin' ? '' : `<aside class="side">
       <div class="searchbox"><form class="search" data-form="search">${ic('search')}<input name="q" placeholder="Search" autocomplete="off" value="${esc(new URLSearchParams(location.search).get('q') || '')}"></form></div>
       ${sideAppCard()}
       <div class="card" id="trends"><h2>What’s happening</h2>${loader()}</div>
@@ -1135,9 +1140,71 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.closest('form[data-form="ai-ask"]') && e.target.name === 'q') { e.preventDefault(); e.target.form.requestSubmit(); }
 }, true);
 
+// ---------- admin dashboard (/admin; only for ADMIN_USERNAMES, the server 404s everyone else) ----------
+const IST = 'Asia/Kolkata';
+const istTime = (ts) => new Date(ts).toLocaleString('en-IN', { timeZone: IST, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) + ' IST';
+const istDay = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+const num = (n) => Number(n || 0).toLocaleString('en-IN');
+function adminCard(label, value, sub, key) {
+  return `<div class="stat-card" data-stat="${key}"><div class="stat-label">${esc(label)}</div><div class="stat-value">${esc(value)}</div>${sub ? `<div class="stat-sub">${esc(sub)}</div>` : ''}</div>`;
+}
+function adminChart(series) {
+  const max = Math.max(1, ...series.map(d => d.count));
+  const total = series.reduce((a, d) => a + d.count, 0);
+  const bars = series.map((d, i) => {
+    const h = d.count ? Math.max(4, Math.round(d.count / max * 100)) : 0;
+    const label = `${istDay(d.date)}: ${d.count} sign-up${d.count === 1 ? '' : 's'}`;
+    return `<div class="bar-col${i === series.length - 1 ? ' today' : ''}" title="${esc(label)}" role="img" aria-label="${esc(label)}" data-date="${d.date}" data-count="${d.count}">
+      <span class="bar-n">${d.count || ''}</span><div class="bar" style="height:${h}%"></div></div>`;
+  }).join('');
+  const ticks = series.map((d, i) => `<span>${i % 5 === 4 || i === series.length - 1 ? esc(istDay(d.date)) : ''}</span>`).join('');
+  return `<div class="chart-card"><div class="chart-head"><h2>Daily sign-ups</h2><span class="stat-sub">Last 30 days (IST) · ${num(total)} total · peak ${num(max === 1 && !total ? 0 : max)}</span></div>
+    <div class="bar-chart" id="signup-chart">${bars}</div><div class="bar-ticks">${ticks}</div></div>`;
+}
+function adminTable(list) {
+  if (!list.length) return `<div class="empty"><p>No real sign-ups yet.</p></div>`;
+  return `<div class="table-wrap"><table class="admin-table"><thead><tr><th>User</th><th>Joined (IST)</th><th>Via</th></tr></thead><tbody>${list.map(u => `
+    <tr><td><a href="/u/${esc(u.username)}" data-link class="adm-user"><span class="n">${esc(u.name)}</span><span class="h">@${esc(u.username)}</span></a></td>
+    <td class="t">${esc(istTime(u.created_at))}</td><td>${u.google ? '<span class="pill pill-g">Google</span>' : '<span class="pill">Password</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function renderAdmin(s) {
+  const el = $('#admin-body'); if (!el) return;
+  const su = s.signups;
+  el.innerHTML = `
+    <div class="stat-grid">
+      ${adminCard('Total users', num(s.users.total), `${num(s.users.real)} real · ${num(s.users.demo)} demo`, 'total')}
+      ${adminCard('New today', num(su.today), 'since 00:00 IST', 'today')}
+      ${adminCard('Yesterday', num(su.yesterday), 'new sign-ups', 'yesterday')}
+      ${adminCard('Last 7 days', num(su.last_7_days), 'new sign-ups', 'last7')}
+      ${adminCard('Last 30 days', num(su.last_30_days), 'new sign-ups', 'last30')}
+      ${adminCard('Active today', num(s.active_users_today), 'posted, replied, liked or DMed', 'active')}
+      ${adminCard('Posts', num(s.posts.total), `${num(s.posts.today)} today`, 'posts')}
+      ${adminCard('DMs', num(s.dms.total), `${num(s.dms.today)} today`, 'dms')}
+    </div>
+    ${adminChart(s.daily_signups)}
+    <div class="section-title">Latest sign-ups</div>
+    ${adminTable(s.latest_signups)}
+    <div class="footer-note">Demo/seeded accounts are excluded from sign-ups. ${num(s.users.google)} real user${s.users.google === 1 ? '' : 's'} joined with Google. Today is ${esc(s.today)} (IST).</div>`;
+  const up = $('#admin-updated'); if (up) up.textContent = 'Updated ' + new Date(s.generated_at).toLocaleTimeString('en-IN', { timeZone: IST, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' IST';
+}
+async function loadAdmin() {
+  const btn = $('[data-action="admin-refresh"]'); if (btn) { btn.disabled = true; btn.classList.add('spinning'); }
+  try { renderAdmin(await api('GET', '/api/admin/stats')); }
+  catch (e) { const el = $('#admin-body'); if (el) el.innerHTML = `<div class="empty"><h3>Couldn’t load stats</h3><p>${esc(e.message)}</p></div>`; }
+  finally { const b = $('[data-action="admin-refresh"]'); if (b) { b.disabled = false; b.classList.remove('spinning'); } }
+}
+function viewAdmin() {
+  if (!state.admin) return shell(`<div class="header"><div class="header-row"><h1>Not found</h1></div></div><div class="empty"><h3>Hmm…this page doesn’t exist.</h3><p>Try searching for something else.</p><a class="btn btn-primary" href="/home" data-link>Go home</a></div>`);
+  shell(`<div class="header"><div class="header-row"><div style="flex:1"><h1>Admin</h1><div class="sub" id="admin-updated">Loading…</div></div>
+      <button class="btn btn-outline" data-action="admin-refresh" aria-label="Refresh stats">↻ Refresh</button></div></div>
+    <div id="admin-body">${loader()}</div>`, { active: 'admin', layout: 'admin' });
+  loadAdmin();
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-action="admin-refresh"]')) loadAdmin(); });
+
 // ---------- boot ----------
 async function refreshMe() {
-  try { const r = await api('GET', '/api/me'); state.me = r.user; state.unread = r.unread || 0; state.dmUnread = r.dm_unread || 0; } catch { state.me = null; }
+  try { const r = await api('GET', '/api/me'); state.me = r.user; state.admin = !!r.admin; state.unread = r.unread || 0; state.dmUnread = r.dm_unread || 0; } catch { state.me = null; }
 }
 setInterval(async () => {
   if (!state.me || document.hidden) return;

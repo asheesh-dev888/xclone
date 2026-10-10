@@ -108,3 +108,19 @@ CREATE TABLE IF NOT EXISTS dm_messages(
 CREATE INDEX IF NOT EXISTS dm_messages_conv_id ON dm_messages(conversation_id, id);
 CREATE INDEX IF NOT EXISTS dm_messages_conv_created ON dm_messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS dm_messages_sender ON dm_messages(sender_id);
+
+-- Admin dashboard: demo/seeded accounts are flagged so they don't count as real sign-ups.
+-- The first time the column is added, existing seed accounts (same usernames as seed.js, password
+-- accounts only) are backfilled; seed.js sets the flag itself for new seeds. Idempotent.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'is_demo') THEN
+    ALTER TABLE users ADD COLUMN is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+    UPDATE users SET is_demo = TRUE WHERE google_id IS NULL AND lower(username) IN
+      ('demo', 'akhil', 'priya_codes', 'rahul_cricket', 'spacenerd', 'foodie_arjun', 'newsbot', 'design_ananya');
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS users_created ON users(created_at);
+CREATE INDEX IF NOT EXISTS likes_created ON likes(created_at);
+CREATE INDEX IF NOT EXISTS dm_messages_created ON dm_messages(created_at);
