@@ -64,7 +64,8 @@ async function tx(fn) {
   } finally { client.release(); }
 }
 
-// Create tables if missing and seed demo data only when there are no users.
+// Create tables if missing and seed demo data only when there are no users
+// (demo DMs only when there are no DM conversations).
 // An advisory lock keeps two instances (e.g. during a deploy) from seeding twice.
 async function init({ retries = 8 } = {}) {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
@@ -73,8 +74,10 @@ async function init({ retries = 8 } = {}) {
       return await tx(async (c) => {
         await c.query('SELECT pg_advisory_xact_lock(424242)');
         await c.query(schema);
-        const seeded = await require('./seed').seed(c);
-        return { seeded };
+        const { seed, seedDMs } = require('./seed');
+        const seeded = await seed(c);
+        const seededDMs = await seedDMs(c); // demo DMs only while there are no DMs at all
+        return { seeded, seededDMs };
       });
     } catch (e) {
       if (attempt >= retries) throw e;

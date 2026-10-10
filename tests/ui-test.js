@@ -168,6 +168,9 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     await mp.screenshot({ path: OUT + '/5-mobile-profile.png' });
     step('screenshots saved');
   }
+  console.log('\n  Direct messages');
+  await dmUi(browser, errors, step);
+  await dmShots(browser, await ctx.storageState(), step);
   await downloadUi(browser, errors, step, await ctx.storageState());
   await googleUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -324,4 +327,178 @@ async function googleUi(browser, errors, step) {
   } finally {
     await ctx.close(); app.child.kill(); mock.srv.close();
   }
+}
+
+// ---------- direct messages ----------
+async function dmUi(browser, errors, step) {
+  const rnd = Math.floor(Math.random() * 1e5);
+  const watch = (p) => { p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); p.on('dialog', d => d.accept()); };
+  const desktop = { viewport: { width: 1366, height: 900 } };
+  const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+  async function user(name) {
+    const ctx = await browser.newContext(desktop);
+    const r = await ctx.request.post(BASE + '/api/signup', { data: { username: name + rnd, password: 'secret123', name: name[0].toUpperCase() + name.slice(1) } });
+    if (!r.ok()) throw new Error('signup failed for ' + name);
+    const page = await ctx.newPage(); watch(page);
+    return { ctx, page, username: name + rnd };
+  }
+  const alice = await user('alice'), bob = await user('bob');
+  const A = alice.page, B = bob.page;
+  const must = async (cond, msg) => { if (!(await cond)) throw new Error(msg); };
+
+  // Bob sits on the home page; his Messages badge must appear without a reload once Alice writes.
+  await B.goto(BASE + '/home'); await B.waitForSelector('#feed');
+  await must(B.isVisible('.nav a.nav-item[href="/messages"]:has-text("Messages") svg'), 'Messages nav item with icon missing');
+  await must(B.isVisible('.bottom-nav a[href="/messages"]').then(v => !v), 'bottom nav should be hidden on desktop');
+  if (await B.$('.nav a[href="/messages"] [data-dm-badge]')) throw new Error('badge shown with no unread DMs');
+  step('left nav has Messages with envelope icon (no badge yet)');
+
+  // Profile "Message" button opens (creates) the chat.
+  await A.goto(BASE + '/u/' + bob.username);
+  await A.waitForSelector('.pf button[data-action="dm-user"][aria-label="Message"] svg');
+  await A.click('.pf button[data-action="dm-user"]');
+  await A.waitForURL(/\/messages\/\d+$/);
+  const convUrl = A.url();
+  await A.waitForSelector(`.dm-chat-head .dm-peer:has-text("@${bob.username}")`);
+  await A.waitForSelector('.dm-hello');
+  step('profile Message button opens a new chat with @' + bob.username);
+  await must(A.evaluate(() => { const l = document.querySelector('.dm-list'), c = document.querySelector('.dm-chat'); const a = l.getBoundingClientRect(), b = c.getBoundingClientRect(); return a.width > 200 && b.width > 400 && a.right <= b.left + 1 && getComputedStyle(l).display !== 'none'; }), 'desktop is not two-pane');
+  await A.waitForSelector(`.dm-conv.active:has-text("@${bob.username}")`);
+  step('desktop two-pane layout: list + chat, active conversation highlighted');
+
+  // Enter to send; Shift+Enter for a new line; textarea grows.
+  const ta = '#dm-compose textarea';
+  const h0 = await A.$eval(ta, e => e.offsetHeight);
+  await A.click(ta);
+  await A.keyboard.type('line one'); for (const l of ['two', 'three', 'four']) { await A.keyboard.press('Shift+Enter'); await A.keyboard.type('line ' + l); }
+  const h1 = await A.$eval(ta, e => e.offsetHeight);
+  if (!(h1 > h0 + 30)) throw new Error(`textarea did not grow (${h0} -> ${h1})`);
+  await A.keyboard.press('Enter');
+  await A.waitForSelector('.msg.mine .bubble:has-text("line four")');
+  if (!(await A.$eval('.msg.mine .bubble', e => e.textContent)).includes('line one\nline two')) throw new Error('newlines lost');
+  if (await A.$eval(ta, e => e.value) !== '') throw new Error('composer not cleared after send');
+  step('Enter sends, Shift+Enter adds a line, textarea grows and resets');
+
+  // XSS is shown as text; URLs become safe links.
+  const evil = `<img src=x onerror="window.__xss=1"><b>bold</b><script>window.__xss=2</script> see https://example.com/path?q=1&r=2.`;
+  await A.fill(ta, evil); await A.press(ta, 'Enter');
+  await A.waitForSelector('.msg.mine .bubble:has-text("<b>bold</b>")');
+  const res = await A.evaluate(() => {
+    const b = [...document.querySelectorAll('.msg.mine .bubble')].pop();
+    const a = b.querySelector('a');
+    return { imgs: b.querySelectorAll('img,script,b').length, text: b.textContent, href: a && a.getAttribute('href'), rel: a && a.rel, target: a && a.target, xss: window.__xss };
+  });
+  if (res.imgs || res.xss) throw new Error('XSS: markup rendered in a message ' + JSON.stringify(res));
+  if (!res.text.includes('<img src=x onerror="window.__xss=1">')) throw new Error('escaped text not shown verbatim');
+  if (res.href !== 'https://example.com/path?q=1&r=2' || !/noopener/.test(res.rel) || res.target !== '_blank') throw new Error('URL not linkified safely: ' + JSON.stringify(res));
+  step('XSS text is escaped (shown literally, nothing executes); URL linkified without trailing "."');
+
+  // Image attach.
+  await A.setInputFiles('#dm-compose input[name=image]', { name: 'pic.png', mimeType: 'image/png', buffer: makePng(200, 120, [255, 122, 0]) });
+  await A.waitForSelector('#dm-compose .dm-preview:not([hidden]) img');
+  await A.click('#dm-compose button.send');
+  await A.waitForSelector('.msg.mine img.dm-img[src^="/media/"]');
+  await imgLoaded(A, '.msg.mine img.dm-img');
+  await must(A.isHidden('#dm-compose .dm-preview'), 'image preview not cleared');
+  step('attach + send an image');
+
+  // Badge updates on Bob's page by polling (no reload).
+  await B.waitForSelector('.nav a[href="/messages"] [data-dm-badge]:has-text("3")', { timeout: 25000 });
+  step('recipient\'s unread badge updates live (3)');
+  await B.click('.nav a[href="/messages"]');
+  await B.waitForSelector(`.dm-conv.unread:has-text("@${alice.username}") .dm-dot:has-text("3")`);
+  step('inbox shows the conversation as unread with a count');
+  await B.click(`.dm-conv:has-text("@${alice.username}")`);
+  await B.waitForSelector('.msg.theirs img.dm-img');
+  await B.waitForSelector('.nav a[href="/messages"] [data-dm-badge]', { state: 'detached' });
+  step('opening the chat marks it read and clears the badge');
+  const style = await B.evaluate(() => {
+    const t = document.querySelector('.msg.theirs .bubble'), el = document.querySelector('#dm-msgs');
+    return { bg: getComputedStyle(t).backgroundColor, left: t.getBoundingClientRect().left - el.getBoundingClientRect().left, bottom: Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) };
+  });
+  if (style.bg !== 'rgb(47, 51, 54)' || style.left > 40) throw new Error('their bubble should be grey, on the left: ' + JSON.stringify(style));
+  if (style.bottom > 5) throw new Error('chat did not auto-scroll to bottom: ' + style.bottom);
+  step('their messages: grey on the left; chat auto-scrolled to the bottom');
+
+  // Seen on Alice's side; Bob's reply arrives on Alice's side by polling.
+  await A.waitForSelector('.msg.mine .seen:has-text("Seen")', { timeout: 10000 });
+  if (await A.$$eval('.msg .seen', l => l.length) !== 1) throw new Error('Seen should only be under the last own message');
+  await must(A.evaluate(() => { const ms = [...document.querySelectorAll('.msg')]; return ms.at(-1).classList.contains('mine') && !!ms.at(-1).querySelector('.seen'); }), 'Seen is not under the last message');
+  step('"Seen" shows under Alice\'s last message once Bob reads');
+  await B.fill(ta, 'Hey Alice! 👋'); await B.press(ta, 'Enter');
+  await B.waitForSelector('.msg.mine .bubble:has-text("Hey Alice!")');
+  const mine = await B.evaluate(() => { const b = [...document.querySelectorAll('.msg.mine .bubble')].pop(), el = document.querySelector('#dm-msgs'); return { bg: getComputedStyle(b).backgroundColor, right: el.getBoundingClientRect().right - b.getBoundingClientRect().right }; });
+  if (mine.bg !== 'rgb(29, 155, 240)' || mine.right > 40) throw new Error('own bubble should be blue, on the right: ' + JSON.stringify(mine));
+  step('own messages: blue on the right');
+  await A.waitForSelector('.msg.theirs .bubble:has-text("Hey Alice!")', { timeout: 10000 });
+  step('reply arrives in the open chat within the 3s poll');
+  if (!(await A.$('.msg time'))) throw new Error('timestamps missing');
+
+  // Delete own message (only own messages have a delete button).
+  if (await A.$('.msg.theirs .msg-del')) throw new Error('delete button on someone else\'s message');
+  const before = await A.$$eval('.msg.mine', l => l.length);
+  await A.hover('.msg.mine >> nth=0'); await A.click('.msg.mine >> nth=0 >> .msg-del');
+  await A.waitForFunction((n) => document.querySelectorAll('.msg.mine').length === n - 1, before);
+  step('delete own message');
+
+  // Load older on scroll up.
+  const cid = +convUrl.split('/').pop();
+  for (let i = 0; i < 20; i++) await alice.ctx.request.post(`${BASE}/api/dm/conversations/${cid}/messages`, { data: { text: 'bulk A ' + i } });
+  for (let i = 0; i < 20; i++) await bob.ctx.request.post(`${BASE}/api/dm/conversations/${cid}/messages`, { data: { text: 'bulk B ' + i } });
+  await A.reload(); await A.waitForSelector('.msg .bubble:has-text("bulk B 19")');
+  const n1 = await A.$$eval('.msg', l => l.length);
+  if (n1 !== 30 || !(await A.$('.dm-older'))) throw new Error('expected 30 messages and a load-older control, got ' + n1);
+  await A.$eval('#dm-msgs', el => { el.scrollTop = 0; });
+  await A.waitForFunction(() => document.querySelectorAll('.msg').length > 30);
+  await A.waitForSelector('.dm-older', { state: 'detached' });
+  await A.waitForSelector('.msg .bubble:has-text("<b>bold</b>")');
+  const keep = await A.$eval('#dm-msgs', el => el.scrollTop);
+  if (keep < 50) throw new Error('scroll position jumped to the top after loading older');
+  step(`scrolling up loads older messages (${n1} -> ${await A.$$eval('.msg', l => l.length)}), keeping position`);
+
+  // New message search in the inbox.
+  await A.goto(BASE + '/messages');
+  await A.waitForSelector('.dm-pick:has-text("Select a message")');
+  await A.fill('form[data-form="dm-new"] input', 'priya');
+  await A.waitForSelector('#dm-results .dm-result[data-username="priya_codes"]');
+  await A.click('#dm-results .dm-result[data-username="priya_codes"]');
+  await A.waitForSelector('.dm-chat-head:has-text("@priya_codes")');
+  step('inbox search starts a new message by username');
+
+  // Mobile: list page, then full-screen chat with a back button.
+  const m = await browser.newContext({ ...mobile, storageState: await bob.ctx.storageState() });
+  const mp = await m.newPage(); watch(mp);
+  await mp.goto(BASE + '/home'); await mp.waitForSelector('#feed');
+  await mp.waitForSelector('.bottom-nav a[href="/messages"] svg', { state: 'visible' });
+  await mp.click('.bottom-nav a[href="/messages"]');
+  await mp.waitForSelector(`.dm-conv:has-text("@${alice.username}")`);
+  await must(mp.isHidden('.dm-chat'), 'mobile list page should not show the chat pane');
+  await must(mp.isVisible('.bottom-nav'), 'bottom nav should show on the mobile inbox');
+  step('mobile: Messages tab in bottom bar -> inbox list');
+  await mp.click(`.dm-conv:has-text("@${alice.username}")`);
+  await mp.waitForSelector('.msg .bubble:has-text("bulk B 19")');
+  const lay = await mp.evaluate(() => { const c = document.querySelector('.dm-chat').getBoundingClientRect(), f = document.querySelector('#dm-compose').getBoundingClientRect(); return { w: c.width, h: c.height, top: c.top, fBottom: f.bottom, nav: getComputedStyle(document.querySelector('.bottom-nav')).display, list: getComputedStyle(document.querySelector('.dm-list')).display, back: getComputedStyle(document.querySelector('.dm-back')).display }; });
+  if (lay.w !== 390 || lay.top !== 0 || Math.abs(lay.h - 844) > 2 || lay.nav !== 'none' || lay.list !== 'none' || lay.back === 'none' || lay.fBottom > 845) throw new Error('mobile chat is not full-screen: ' + JSON.stringify(lay));
+  step('mobile: chat is full-screen with a back button (no bottom bar)');
+  await mp.click('.dm-back');
+  await mp.waitForURL('**/messages'); await mp.waitForSelector('.dm-list', { state: 'visible' });
+  await must(mp.isVisible('.bottom-nav'), 'bottom nav should come back');
+  step('mobile: back button returns to the inbox');
+  await m.close(); await alice.ctx.close(); await bob.ctx.close();
+}
+
+// Screenshots 10/11: demo user with a chat open (desktop two-pane + mobile full-screen chat).
+async function dmShots(browser, loggedIn, step) {
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, storageState: loggedIn });
+  const p = await ctx.newPage();
+  await p.goto(BASE + '/messages'); await p.waitForSelector('.dm-conv');
+  await p.click('.dm-conv:has-text("@priya_codes")'); await p.waitForSelector('.msg'); await p.waitForTimeout(500);
+  await p.screenshot({ path: OUT + '/10-dm-desktop.png' });
+  const m = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: loggedIn });
+  const mp = await m.newPage();
+  await mp.goto(BASE + '/messages'); await mp.waitForSelector('.dm-conv');
+  await mp.click('.dm-conv:has-text("@akhil")'); await mp.waitForSelector('.msg'); await mp.waitForTimeout(500);
+  await mp.screenshot({ path: OUT + '/11-dm-mobile.png' });
+  await ctx.close(); await m.close();
+  step('DM screenshots saved (10-dm-desktop.png, 11-dm-mobile.png)');
 }

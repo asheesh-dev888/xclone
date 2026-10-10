@@ -72,3 +72,39 @@ CREATE TABLE IF NOT EXISTS media(
   data BYTEA NOT NULL,
   created_at BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS media_post ON media(post_id);
+
+-- Direct messages. One conversation per pair of users (user_a < user_b keeps the pair unique),
+-- a membership row per user carrying last_read_at (read tracking), and the messages themselves.
+CREATE TABLE IF NOT EXISTS dm_conversations(
+  id SERIAL PRIMARY KEY,
+  user_a INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_b INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at BIGINT NOT NULL,
+  last_message_at BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT dm_pair_ordered CHECK (user_a < user_b),
+  CONSTRAINT dm_pair_unique UNIQUE (user_a, user_b));
+CREATE INDEX IF NOT EXISTS dm_conversations_b ON dm_conversations(user_b);
+
+CREATE TABLE IF NOT EXISTS dm_members(
+  conversation_id INTEGER NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  last_read_at BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY(conversation_id, user_id));
+CREATE INDEX IF NOT EXISTS dm_members_user ON dm_members(user_id);
+
+-- DM images live in media with conversation_id set; /media/:id only serves them to members.
+ALTER TABLE media ADD COLUMN IF NOT EXISTS conversation_id INTEGER REFERENCES dm_conversations(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS media_conversation ON media(conversation_id);
+
+CREATE TABLE IF NOT EXISTS dm_messages(
+  id SERIAL PRIMARY KEY,
+  conversation_id INTEGER NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
+  sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  text TEXT NOT NULL DEFAULT '',
+  media_id TEXT REFERENCES media(id) ON DELETE SET NULL,
+  created_at BIGINT NOT NULL,
+  CONSTRAINT dm_text_len CHECK (char_length(text) <= 1000));
+CREATE INDEX IF NOT EXISTS dm_messages_conv_id ON dm_messages(conversation_id, id);
+CREATE INDEX IF NOT EXISTS dm_messages_conv_created ON dm_messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS dm_messages_sender ON dm_messages(sender_id);

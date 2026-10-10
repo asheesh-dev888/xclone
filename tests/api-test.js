@@ -4,14 +4,15 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗', m); } };
 function client() {
   let cookie = '';
-  return async (method, path, body, isForm) => {
+  const c = async (method, path, body, isForm) => {
     const headers = cookie ? { cookie } : {};
     let b;
     if (isForm) b = body; else if (body) { headers['content-type'] = 'application/json'; b = JSON.stringify(body); }
     const r = await fetch(BASE + path, { method, headers, body: b });
-    const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+    const sc = r.headers.get('set-cookie'); if (sc) c.cookie = cookie = sc.split(';')[0];
     return { status: r.status, data: await r.json().catch(() => ({})) };
   };
+  return c;
 }
 (async () => {
   const u = 'tester' + Math.floor(Math.random() * 1e5);
@@ -67,6 +68,7 @@ function client() {
   mr = await fetch(BASE + img); ok(mr.status === 404, 'deleted post\'s image is gone');
   r = await a('GET', '/healthz'); ok(r.status === 200 && r.data.db === 'ok', 'healthz checks DB');
   r = await a('POST', '/api/logout'); r = await a('GET', '/api/feed/home'); ok(r.status === 401, 'logout ends session');
+  await dmTests();
   await downloadTests();
   await googleTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
@@ -204,4 +206,123 @@ async function downloadTests() {
   const bypass = m && new Function('return ' + m[1])();
   ok(bypass && bypass.test('/download/ZuZu.apk') && bypass.test('/download') && bypass.test('/api/me') && !bypass.test('/app.js') && !bypass.test('/downloads-page'), 'service worker bypasses (never caches) /download');
   ok(bypass && !/['"]\/download/.test(sw.match(/const SHELL = \[[^\]]*\]/)[0]), '/download not precached in the SW shell list');
+}
+
+// ---------- direct messages ----------
+async function dmTests() {
+  console.log('\n  Direct messages');
+  const rnd = Math.floor(Math.random() * 1e6);
+  const mk = async (name) => { const c = client(); const r = await c('POST', '/api/signup', { username: name + rnd, password: 'secret123', name }); if (r.status !== 200) throw new Error('signup ' + name); c.user = r.data.user; return c; };
+  const x = await mk('dmx'), y = await mk('dmy'), z = await mk('dmz');
+  const X = x.user.username, Y = y.user.username, Z = z.user.username;
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  const form = (text, file) => { const f = new FormData(); if (text != null) f.append('text', text); if (file) f.append('image', new Blob([file.data], { type: file.type }), file.name); return f; };
+  const send = (c, id, text, file) => c('POST', `/api/dm/conversations/${id}/messages`, form(text, file), true);
+
+  let r = await client()('GET', '/api/dm/conversations'); ok(r.status === 401, 'DM API requires login (401)');
+  r = await x('POST', '/api/dm/conversations', { username: Y });
+  ok(r.status === 201 && r.data.created && r.data.conversation.user.username === Y, 'create conversation with @' + Y + ' (201)');
+  const cid = r.data.conversation.id;
+  r = await x('POST', '/api/dm/conversations', { username: Y.toUpperCase() }); ok(r.status === 200 && !r.data.created && r.data.conversation.id === cid, 'get-or-create returns the same conversation');
+  r = await y('POST', '/api/dm/conversations', { username: '@' + X }); ok(r.status === 200 && r.data.conversation.id === cid && r.data.conversation.user.username === X, 'other member gets the same conversation (unique per pair)');
+  r = await x('POST', '/api/dm/conversations', { username: X }); ok(r.status === 400, 'cannot DM yourself (400)');
+  r = await x('POST', '/api/dm/conversations', { username: 'nobody_' + rnd }); ok(r.status === 404, 'unknown user -> 404');
+  r = await x('GET', `/api/dm/conversations/${cid}`); ok(r.status === 200 && r.data.conversation.user.username === Y, 'GET conversation');
+  r = await y('GET', '/api/dm/conversations'); ok(!r.data.conversations.some(c => c.id === cid), 'empty conversation hidden from the other member until a message is sent');
+
+  // text + image
+  r = await send(x, cid, '  Hello @' + Y + ' https://example.com/a?b=1  '); ok(r.status === 201 && r.data.message.text === 'Hello @' + Y + ' https://example.com/a?b=1' && r.data.message.sender_id === x.user.id, 'send text message (trimmed)');
+  const first = r.data.message;
+  r = await send(x, cid, '', { data: png, type: 'image/png', name: 'dot.png' });
+  ok(r.status === 201 && /^\/media\/[0-9a-f]{24}$/.test(r.data.message.image || ''), 'send image-only message');
+  const imgMsg = r.data.message;
+  r = await send(x, cid, 'caption', { data: png, type: 'image/jpeg', name: 'lies.jpg' });
+  ok(r.status === 201 && r.data.message.image, 'send text + image (mimetype from magic bytes)');
+  const capMsg = r.data.message;
+  const getMedia = async (c, url) => fetch(BASE + url, { headers: c && c.cookie ? { cookie: c.cookie } : {} });
+  let mr = await fetch(BASE + capMsg.image, { headers: { cookie: y.cookie } });
+  ok(mr.status === 200 && mr.headers.get('content-type') === 'image/png' && Buffer.from(await mr.arrayBuffer()).equals(png) && /private/.test(mr.headers.get('cache-control')), 'member gets DM image (served as real type image/png, private cache)');
+  mr = await fetch(BASE + capMsg.image, { headers: { cookie: z.cookie } }); ok(mr.status === 404, 'outsider cannot load DM image (404)');
+  mr = await fetch(BASE + capMsg.image); ok(mr.status === 404, 'logged-out user cannot load DM image (404)');
+  r = await send(x, cid, 'fake', { data: Buffer.from('<?php echo "not an image"; ?>............'), type: 'image/png', name: 'evil.png' });
+  ok(r.status === 400 && /valid image/.test(r.data.error), 'fake image (wrong magic bytes, image/png mimetype) rejected');
+  r = await send(x, cid, 'svg', { data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), type: 'image/svg+xml', name: 'x.svg' });
+  ok(r.status === 400, 'non-image / SVG upload rejected');
+  r = await send(x, cid, 'pdf', { data: Buffer.from('%PDF-1.4 fake pdf data'), type: 'application/pdf', name: 'x.pdf' });
+  ok(r.status === 400, 'non-image mimetype rejected');
+  r = await send(x, cid, 'big', { data: Buffer.concat([png, Buffer.alloc(5 * 1024 * 1024)]), type: 'image/png', name: 'big.png' });
+  ok(r.status === 413, 'image over 5MB rejected (413)');
+  r = await send(x, cid, ''); ok(r.status === 400, 'empty message rejected');
+  r = await send(x, cid, 'a'.repeat(1001)); ok(r.status === 400, '1001 chars rejected');
+  r = await send(x, cid, '😀'.repeat(1000)); ok(r.status === 201 && [...r.data.message.text].length === 1000, '1000 chars (emoji) accepted');
+  r = await x('POST', `/api/dm/conversations/${cid}/messages`, { text: 'json works too' }); ok(r.status === 201, 'JSON body accepted for text-only');
+  const xss = '<img src=x onerror="alert(1)"><script>alert(2)</script>&amp;';
+  r = await send(x, cid, xss); ok(r.status === 201 && r.data.message.text === xss, 'XSS text stored verbatim (escaped at render time)');
+  const xssId = r.data.message.id;
+  const resp = await fetch(BASE + `/api/dm/conversations/${cid}/messages`, { headers: { cookie: x.cookie } });
+  ok(/application\/json/.test(resp.headers.get('content-type')) && resp.headers.get('cache-control') === 'no-store', 'DM API responses are JSON + Cache-Control: no-store');
+
+  // unread + read flow
+  r = await x('GET', '/api/dm/unread'); ok(r.status === 200 && r.data.unread === 0, 'sender has 0 unread');
+  r = await y('GET', '/api/dm/unread'); const yUnread = r.data.unread; ok(yUnread === 6, 'recipient unread count = 6 (got ' + yUnread + ')');
+  r = await y('GET', '/api/me'); ok(r.data.dm_unread === 6, '/api/me includes dm_unread');
+  r = await y('GET', '/api/dm/conversations'); let row = r.data.conversations.find(c => c.id === cid);
+  ok(row && row.unread === 6 && row.user.username === X && row.last_message.sender_id === x.user.id && row.last_message.text === xss, 'conversation list: other user, last message preview, unread count');
+  r = await x('GET', `/api/dm/conversations/${cid}/messages`); ok(r.data.other_last_read_at < r.data.messages.at(-1).created_at, 'not Seen before the recipient reads');
+  r = await y('POST', `/api/dm/conversations/${cid}/read`, { up_to: capMsg.id }); ok(r.status === 200 && r.data.unread === 3, 'read up_to a message marks only up to it (3 left)');
+  r = await y('POST', `/api/dm/conversations/${cid}/read`); ok(r.data.unread === 0, 'mark conversation read -> unread 0');
+  r = await y('GET', '/api/dm/unread'); ok(r.data.unread === 0, 'GET /api/dm/unread = 0 after read');
+  r = await x('GET', `/api/dm/conversations/${cid}/messages`); ok(r.data.other_last_read_at >= r.data.messages.at(-1).created_at, 'sender sees other_last_read_at >= last message (Seen)');
+
+  // reply + newest-first ordering
+  const c2 = (await y('POST', '/api/dm/conversations', { username: Z })).data.conversation.id;
+  await send(z, c2, 'hi from z');
+  r = await y('GET', '/api/dm/conversations'); ok(r.data.conversations[0].id === c2 && r.data.conversations[1].id === cid, 'conversations listed newest first');
+  for (let i = 1; i <= 5; i++) await send(y, cid, 'reply ' + i);
+  r = await y('GET', '/api/dm/conversations'); ok(r.data.conversations[0].id === cid && r.data.conversations[0].last_message.text === 'reply 5', 'new message moves conversation to top');
+  r = await x('GET', '/api/dm/unread'); ok(r.data.unread === 5, 'unread counts per user (x has 5)');
+
+  // pagination: 11 messages so far
+  r = await x('GET', `/api/dm/conversations/${cid}/messages`); const all = r.data.messages; ok(all.length === 11 && !r.data.has_more, 'all 11 messages, oldest first');
+  ok(all.every((m, i) => !i || (m.id > all[i - 1].id && m.created_at > all[i - 1].created_at)), 'ids and timestamps strictly increasing');
+  let page = await x('GET', `/api/dm/conversations/${cid}/messages?limit=5`);
+  const seen = [...page.data.messages];
+  ok(page.data.messages.length === 5 && page.data.has_more && page.data.messages.at(-1).text === 'reply 5', 'page 1: newest 5, has_more');
+  while (page.data.has_more) {
+    page = await x('GET', `/api/dm/conversations/${cid}/messages?limit=5&before=${seen[0].id}`);
+    seen.unshift(...page.data.messages);
+  }
+  ok(seen.length === 11 && seen.map(m => m.id).join() === all.map(m => m.id).join(), 'paging with before= walks all messages without gaps or duplicates');
+  r = await x('GET', `/api/dm/conversations/${cid}/messages?after=${all[8].id}`); ok(r.data.messages.length === 2 && r.data.messages[0].id === all[9].id, 'after= returns only newer messages (polling)');
+
+  // outsider
+  for (const [m, p, b] of [['GET', `/api/dm/conversations/${cid}`], ['GET', `/api/dm/conversations/${cid}/messages`], ['POST', `/api/dm/conversations/${cid}/read`, {}], ['DELETE', `/api/dm/messages/${first.id}`]]) {
+    r = await z(m, p, b); ok(r.status === 404 || r.status === 403, `outsider ${m} ${p} -> ${r.status}`);
+  }
+  r = await send(z, cid, 'let me in'); ok(r.status === 404 || r.status === 403, 'outsider cannot post into the conversation -> ' + r.status);
+  r = await z('GET', '/api/dm/conversations'); ok(!r.data.conversations.some(c => c.id === cid), 'outsider does not see the conversation in their list');
+  r = await x('GET', '/api/dm/conversations/999999999/messages'); ok(r.status === 404, 'unknown conversation -> 404');
+
+  // delete own only
+  r = await y('DELETE', `/api/dm/messages/${first.id}`); ok(r.status === 403, 'cannot delete the other person\'s message (403)');
+  r = await x('DELETE', `/api/dm/messages/${first.id}`); ok(r.status === 200, 'delete own message');
+  r = await x('DELETE', `/api/dm/messages/${first.id}`); ok(r.status === 404, 'deleted message is gone (404 on second delete)');
+  r = await x('DELETE', `/api/dm/messages/${imgMsg.id}`); mr = await fetch(BASE + imgMsg.image, { headers: { cookie: x.cookie } });
+  ok(r.status === 200 && mr.status === 404, 'deleting an image message deletes its image');
+  r = await y('GET', `/api/dm/conversations/${cid}/messages`); ok(!r.data.messages.some(m => m.id === first.id || m.id === imgMsg.id) && r.data.messages.some(m => m.id === xssId), 'deleted messages gone for both members');
+
+  // rate limit: 30 messages a minute per user
+  const w = await mk('dmw'), v = await mk('dmv');
+  const c3 = (await w('POST', '/api/dm/conversations', { username: v.user.username })).data.conversation.id;
+  const codes = [];
+  for (let i = 0; i < 30; i++) codes.push((await w('POST', `/api/dm/conversations/${c3}/messages`, { text: 'spam ' + i })).status);
+  ok(codes.every(s => s === 201), '30 messages in a minute allowed');
+  const rl = await fetch(BASE + `/api/dm/conversations/${c3}/messages`, { method: 'POST', headers: { cookie: w.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ text: 'one too many' }) });
+  ok(rl.status === 429 && +rl.headers.get('retry-after') > 0, '31st message in a minute -> 429 with Retry-After');
+  r = await v('POST', `/api/dm/conversations/${c3}/messages`, { text: 'I can still reply' }); ok(r.status === 201, 'rate limit is per user');
+
+  // service worker never caches /api/dm
+  const sw = await (await fetch(BASE + '/sw.js')).text();
+  const bypass = eval(sw.match(/const BYPASS = (\/.*\/);/)[1]);
+  ok(bypass.test('/api/dm/conversations') && bypass.test('/api/dm/unread') && /\/api\/dm/.test(sw), 'service worker bypasses /api/dm');
 }

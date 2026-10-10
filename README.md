@@ -48,6 +48,32 @@ It is shown only on Android and desktop browsers: hidden on iOS and inside the a
 `display-mode: standalone`, a `document.referrer` starting with `android-app://com.zuzu.app`, or `?source=twa`
 (remembered in `sessionStorage` for the tab).
 
+## Direct messages
+X-style 1:1 DMs. Tables (in `schema.sql`, idempotent): `dm_conversations` (one per pair, `user_a < user_b`
+unique), `dm_members` (per-user `last_read_at` for read tracking) and `dm_messages` (text up to 1000 chars,
+optional image in `media` with `conversation_id` set). DM images are only served to the two members
+(`/media/:id` returns 404 to anyone else, `Cache-Control: private`). Message timestamps are strictly increasing
+per conversation so read tracking by timestamp is exact.
+
+API (login required; non-members get 404; responses are `Cache-Control: no-store`):
+
+    GET    /api/dm/conversations                  list: other user, last message preview, unread, newest first
+    POST   /api/dm/conversations {username}       get or create (400 for yourself)
+    GET    /api/dm/conversations/:id              one conversation
+    GET    /api/dm/conversations/:id/messages     ?before=<msg id>&limit= (older pages) or ?after=<msg id> (polling)
+                                                  also returns other_last_read_at (for "Seen")
+    POST   /api/dm/conversations/:id/messages     multipart text and/or image (PNG/JPEG/GIF/WebP, 5 MB,
+                                                  type checked by magic bytes); 30 messages/min per user (429)
+    POST   /api/dm/conversations/:id/read         {up_to: <msg id>} optional
+    GET    /api/dm/unread                         total unread messages (also `dm_unread` in /api/me)
+    DELETE /api/dm/messages/:id                   own messages only (403 otherwise)
+
+UI: `/messages` (inbox + "search people to message") and `/messages/:id` (chat). Two panes on desktop; list then
+full-screen chat with a back button on mobile. The open chat polls every 3 s and the Messages badge every 15 s,
+both paused while the tab is hidden. Message text is escaped; http(s) URLs are linkified.
+On startup, if there are no DM conversations at all, 3 short demo conversations are added (2 with `demo`).
+The rate limiter is in memory, so it is per server instance and resets on restart.
+
 ## Local commands
     cd /workspace/xclone
     ./start.sh app        # (re)start the app in the background (logs: server.log)
@@ -57,7 +83,7 @@ It is shown only on Android and desktop browsers: hidden on iOS and inside the a
     node seed.js          # create tables + seed demo data if the DB is empty (needs DATABASE_URL)
     node tests/api-test.js    # API checks (+ Google flow against a mock token endpoint on :4189)
     node tests/ui-test.js     # headless Chrome end-to-end flow
-    node tests/shots.js       # regenerate screenshots/ (read-only, logs in as demo)
+    node tests/shots.js       # regenerate screenshots/ (logs in as demo; opening DMs marks them read)
 
 ## Files
 server.js (API + static), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,

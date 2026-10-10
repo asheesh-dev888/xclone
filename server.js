@@ -98,7 +98,9 @@ app.post('/api/logout', h(async (req, res) => {
 app.get('/api/me', h(async (req, res) => {
   if (!req.user) return res.json({ user: null });
   const { c } = await db.get('SELECT COUNT(*)::int c FROM notifications WHERE user_id=$1 AND NOT read', [req.user.id]);
-  res.json({ user: publicUser(req.user), unread: c });
+  const dm = await db.get(`SELECT COUNT(*)::int n FROM dm_members mb JOIN dm_messages m ON m.conversation_id=mb.conversation_id
+    WHERE mb.user_id=$1 AND m.sender_id<>$1 AND m.created_at>mb.last_read_at`, [req.user.id]);
+  res.json({ user: publicUser(req.user), unread: c, dm_unread: dm.n });
 }));
 
 // ---------- Continue with Google (OAuth 2.0 authorization code flow) ----------
@@ -175,9 +177,18 @@ const mediaIdOf = (url) => (url && url.startsWith('/media/') ? url.slice(7) : nu
 
 app.get('/media/:id', h(async (req, res) => {
   if (!/^[0-9a-f]{24}$/.test(req.params.id)) return res.status(404).end();
+  const meta = await db.get('SELECT conversation_id FROM media WHERE id=$1', [req.params.id]);
+  if (!meta) return res.status(404).end();
+  if (meta.conversation_id) {
+    // DM image: only the two members of that conversation may see it.
+    const token = req.cookies.sid || (req.headers.authorization || '').replace(/^Bearer /, '');
+    const member = token && await db.get(`SELECT 1 FROM sessions s JOIN dm_members mb ON mb.user_id=s.user_id
+      WHERE s.token=$1 AND mb.conversation_id=$2`, [token, meta.conversation_id]);
+    if (!member) return res.status(404).end();
+  }
   const m = await db.get('SELECT mime, data FROM media WHERE id=$1', [req.params.id]);
   if (!m) return res.status(404).end();
-  res.set({ 'Content-Type': m.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+  res.set({ 'Content-Type': m.mime, 'Cache-Control': meta.conversation_id ? 'private, max-age=86400' : 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
   res.send(m.data);
 }));
 
@@ -427,6 +438,172 @@ app.get('/api/notifications', auth, h(async (req, res) => {
   res.json({ items: rows });
 }));
 
+// ---------- direct messages ----------
+const DM_MAX_LEN = 1000;
+const DM_RATE_MAX = parseInt(process.env.DM_RATE_MAX || '30', 10); // messages per user per window
+const DM_RATE_WINDOW = 60 * 1000;
+// Real image type from the file's magic bytes (the client-sent mimetype is not trusted).
+function sniffImage(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (/^GIF8[79]a$/.test(buf.toString('latin1', 0, 6))) return 'image/gif';
+  if (buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+const dmUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD, files: 1, fields: 5 },
+  fileFilter: (req, file, cb) => /^image\/(png|jpe?g|gif|webp)$/.test(file.mimetype)
+    ? cb(null, true)
+    : cb(Object.assign(new Error('Only images (PNG, JPEG, GIF or WebP) can be sent'), { status: 400 })),
+});
+// Simple in-memory sliding-window limiter per user (per server instance).
+const dmSends = new Map();
+function dmRateCheck(req, res, next) {
+  const t = now(), recent = (dmSends.get(req.user.id) || []).filter(x => t - x < DM_RATE_WINDOW);
+  dmSends.set(req.user.id, recent);
+  if (recent.length >= DM_RATE_MAX) {
+    res.set('Retry-After', String(Math.ceil((recent[0] + DM_RATE_WINDOW - t) / 1000)));
+    return res.status(429).json({ error: 'You’re sending messages too fast. Try again in a minute.' });
+  }
+  next();
+}
+const dmRecordSend = (userId) => { const a = dmSends.get(userId) || []; a.push(now()); dmSends.set(userId, a); };
+setInterval(() => { const t = now(); for (const [k, a] of dmSends) if (!a.some(x => t - x < DM_RATE_WINDOW)) dmSends.delete(k); }, 5 * 60e3).unref();
+
+// DM responses are private and live: never cache.
+app.use('/api/dm', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, auth);
+
+const dmMessage = (m) => ({ id: m.id, conversation_id: m.conversation_id, sender_id: m.sender_id, text: m.text, image: m.media_id ? '/media/' + m.media_id : null, created_at: m.created_at });
+const dmUser = (r) => ({ id: r.uid, username: r.username, name: r.name, avatar: r.avatar });
+// Conversation rows for user @me (one per conversation), with the other member, last message and unread count.
+const DM_CONV_SELECT = `
+SELECT c.id, c.created_at, c.created_by, mb.last_read_at, om.last_read_at other_last_read_at,
+  o.id uid, o.username, o.name, o.avatar,
+  lm.id lm_id, lm.text lm_text, lm.media_id lm_media, lm.sender_id lm_sender, lm.created_at lm_at,
+  (SELECT COUNT(*)::int FROM dm_messages x WHERE x.conversation_id=c.id AND x.sender_id<>@me AND x.created_at>mb.last_read_at) unread
+FROM dm_members mb
+JOIN dm_conversations c ON c.id=mb.conversation_id
+JOIN dm_members om ON om.conversation_id=c.id AND om.user_id<>@me
+JOIN users o ON o.id=om.user_id
+LEFT JOIN LATERAL (SELECT * FROM dm_messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1) lm ON TRUE
+WHERE mb.user_id=@me`;
+const dmConv = (r) => ({
+  id: r.id, user: dmUser(r), unread: r.unread, created_at: r.created_at,
+  updated_at: r.lm_at || r.created_at, other_last_read_at: r.other_last_read_at,
+  last_message: r.lm_id ? { id: r.lm_id, text: [...r.lm_text].slice(0, 100).join(''), has_image: !!r.lm_media, sender_id: r.lm_sender, created_at: r.lm_at } : null,
+});
+const dmUnreadTotal = async (userId) => (await db.get(`SELECT COUNT(*)::int n FROM dm_members mb JOIN dm_messages m ON m.conversation_id=mb.conversation_id
+  WHERE mb.user_id=$1 AND m.sender_id<>$1 AND m.created_at>mb.last_read_at`, [userId])).n;
+// Load the conversation for :id if the current user is a member; otherwise 404 (don't reveal it exists).
+async function dmMembership(req, res) {
+  const id = postIdParam(req, res); if (!id) return null;
+  const c = await db.get(`SELECT c.*, mb.last_read_at FROM dm_members mb JOIN dm_conversations c ON c.id=mb.conversation_id
+    WHERE mb.conversation_id=$1 AND mb.user_id=$2`, [id, req.user.id]);
+  if (!c) { res.status(404).json({ error: 'Conversation not found' }); return null; }
+  return c;
+}
+
+app.get('/api/dm/unread', h(async (req, res) => res.json({ unread: await dmUnreadTotal(req.user.id) })));
+
+app.get('/api/dm/conversations', h(async (req, res) => {
+  // Empty conversations only show for the person who opened them.
+  const rows = await db.all(`${DM_CONV_SELECT} AND (lm.id IS NOT NULL OR c.created_by=@me)
+    ORDER BY COALESCE(lm.created_at, c.created_at) DESC, c.id DESC LIMIT 100`, { me: req.user.id });
+  res.json({ conversations: rows.map(dmConv) });
+}));
+
+app.post('/api/dm/conversations', h(async (req, res) => {
+  const other = await findUser(cleanUsername((req.body || {}).username));
+  if (!other) return res.status(404).json({ error: 'User not found' });
+  if (other.id === req.user.id) return res.status(400).json({ error: 'You can’t message yourself' });
+  const [a, b] = [Math.min(req.user.id, other.id), Math.max(req.user.id, other.id)];
+  const created = await db.tx(async (c) => {
+    const row = await db.get(`INSERT INTO dm_conversations(user_a,user_b,created_by,created_at) VALUES ($1,$2,$3,$4)
+      ON CONFLICT ON CONSTRAINT dm_pair_unique DO NOTHING RETURNING id`, [a, b, req.user.id, now()], c);
+    if (!row) return null;
+    await db.run('INSERT INTO dm_members(conversation_id,user_id) VALUES ($1,$2),($1,$3)', [row.id, a, b], c);
+    return row.id;
+  });
+  const id = created || (await db.get('SELECT id FROM dm_conversations WHERE user_a=$1 AND user_b=$2', [a, b])).id;
+  const row = await db.get(DM_CONV_SELECT + ' AND c.id=@id', { me: req.user.id, id });
+  res.status(created ? 201 : 200).json({ conversation: dmConv(row), created: !!created });
+}));
+
+app.get('/api/dm/conversations/:id', h(async (req, res) => {
+  const c = await dmMembership(req, res); if (!c) return;
+  res.json({ conversation: dmConv(await db.get(DM_CONV_SELECT + ' AND c.id=@id', { me: req.user.id, id: c.id })) });
+}));
+
+// ?before=<message id> pages backwards (older); ?after=<message id> returns newer ones (polling).
+app.get('/api/dm/conversations/:id/messages', h(async (req, res) => {
+  const c = await dmMembership(req, res); if (!c) return;
+  const limit = Math.min(Math.max(parseInt(req.query.limit || '30', 10) || 30, 1), 100);
+  const before = parseInt(req.query.before || '0', 10) || 0, after = parseInt(req.query.after || '0', 10) || 0;
+  let rows, hasMore;
+  if (after > 0) {
+    rows = await db.all('SELECT * FROM dm_messages WHERE conversation_id=$1 AND id>$2 ORDER BY id ASC LIMIT $3', [c.id, after, limit + 1]);
+    hasMore = rows.length > limit; rows = rows.slice(0, limit);
+  } else {
+    rows = await db.all(`SELECT * FROM dm_messages WHERE conversation_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3`, [c.id, before > 0 ? before : 2 ** 31 - 1, limit + 1]);
+    hasMore = rows.length > limit; rows = rows.slice(0, limit).reverse();
+  }
+  const other = await db.get('SELECT last_read_at FROM dm_members WHERE conversation_id=$1 AND user_id<>$2', [c.id, req.user.id]);
+  res.json({ messages: rows.map(dmMessage), has_more: hasMore, my_last_read_at: c.last_read_at, other_last_read_at: other ? other.last_read_at : 0 });
+}));
+
+app.post('/api/dm/conversations/:id/messages', dmRateCheck, dmUpload.single('image'), h(async (req, res) => {
+  const c = await dmMembership(req, res); if (!c) return;
+  const text = String((req.body || {}).text || '').trim();
+  if (!text && !req.file) return res.status(400).json({ error: 'Message cannot be empty' });
+  if ([...text].length > DM_MAX_LEN) return res.status(400).json({ error: `Message is over ${DM_MAX_LEN} characters` });
+  let mime = null;
+  if (req.file) {
+    mime = sniffImage(req.file.buffer);
+    if (!mime) return res.status(400).json({ error: 'That file isn’t a valid image (PNG, JPEG, GIF or WebP)' });
+  }
+  const msg = await db.tx(async (cl) => {
+    // Lock the conversation so created_at is strictly increasing per conversation (read tracking compares timestamps).
+    const conv = await db.get('SELECT last_message_at FROM dm_conversations WHERE id=$1 FOR UPDATE', [c.id], cl);
+    const ts = Math.max(now(), conv.last_message_at + 1);
+    let mediaId = null;
+    if (req.file) {
+      mediaId = newMediaId();
+      await db.run('INSERT INTO media(id,user_id,conversation_id,mime,size,data,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [mediaId, req.user.id, c.id, mime, req.file.size, req.file.buffer, ts], cl);
+    }
+    const m = await db.get('INSERT INTO dm_messages(conversation_id,sender_id,text,media_id,created_at) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [c.id, req.user.id, text, mediaId, ts], cl);
+    await db.run('UPDATE dm_conversations SET last_message_at=$1 WHERE id=$2', [ts, c.id], cl);
+    await db.run('UPDATE dm_members SET last_read_at=GREATEST(last_read_at,$1) WHERE conversation_id=$2 AND user_id=$3', [ts, c.id, req.user.id], cl);
+    return m;
+  });
+  dmRecordSend(req.user.id);
+  res.status(201).json({ message: dmMessage(msg) });
+}));
+
+// Mark read up to message `up_to` (what the client has shown), or everything if omitted.
+app.post('/api/dm/conversations/:id/read', h(async (req, res) => {
+  const c = await dmMembership(req, res); if (!c) return;
+  const upTo = parseInt((req.body || {}).up_to || '0', 10) || 0;
+  const r = await db.get(`SELECT MAX(created_at) t FROM dm_messages WHERE conversation_id=$1 ${upTo ? 'AND id<=$2' : ''}`, upTo ? [c.id, upTo] : [c.id]);
+  if (r && r.t) await db.run('UPDATE dm_members SET last_read_at=GREATEST(last_read_at,$1) WHERE conversation_id=$2 AND user_id=$3', [r.t, c.id, req.user.id]);
+  res.json({ ok: true, unread: await dmUnreadTotal(req.user.id) });
+}));
+
+app.delete('/api/dm/messages/:id', h(async (req, res) => {
+  const id = postIdParam(req, res); if (!id) return;
+  const m = await db.get(`SELECT m.* FROM dm_messages m JOIN dm_members mb ON mb.conversation_id=m.conversation_id AND mb.user_id=$2 WHERE m.id=$1`, [id, req.user.id]);
+  if (!m) return res.status(404).json({ error: 'Message not found' });
+  if (m.sender_id !== req.user.id) return res.status(403).json({ error: 'You can only delete your own messages' });
+  await db.tx(async (c) => {
+    await db.run('DELETE FROM dm_messages WHERE id=$1', [m.id], c);
+    if (m.media_id) await db.run('DELETE FROM media WHERE id=$1', [m.media_id], c);
+  });
+  res.json({ ok: true });
+}));
+
 app.get('/healthz', h(async (req, res) => {
   try {
     await db.query('SELECT 1');
@@ -447,7 +624,8 @@ app.use((err, req, res, next) => {
 app.use(express.static(path.join(ROOT, 'public'), { index: false }));
 app.get('*', (req, res) => res.sendFile(path.join(ROOT, 'public', 'index.html')));
 
-db.init().then(({ seeded }) => {
+db.init().then(({ seeded, seededDMs }) => {
   if (seeded) console.log('Empty database: seeded demo data');
+  if (seededDMs) console.log('No DMs yet: seeded demo conversations');
   app.listen(PORT, '0.0.0.0', () => console.log(`ZuZu listening on http://localhost:${PORT}`));
 }).catch((e) => { console.error('Could not initialise database:', e.message); process.exit(1); });

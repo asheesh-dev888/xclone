@@ -31,6 +31,9 @@ const P = {
   camera: 'M9.697 3H11v2h-.697l-3 2H5c-.276 0-.5.224-.5.5v11c0 .276.224.5.5.5h14c.276 0 .5-.224.5-.5V10h2v8.5c0 1.381-1.119 2.5-2.5 2.5H5c-1.381 0-2.5-1.119-2.5-2.5v-11C2.5 6.119 3.619 5 5 5h1.697l3-2zM12 10.5c-1.105 0-2 .895-2 2s.895 2 2 2 2-.895 2-2-.895-2-2-2zm-4 2c0-2.209 1.791-4 4-4s4 1.791 4 4-1.791 4-4 4-4-1.791-4-4zM17 2c0 1.657-1.343 3-3 3v1c1.657 0 3 1.343 3 3h1c0-1.657 1.343-3 3-3V5c-1.657 0-3-1.343-3-3h-1z',
   userFill: 'M17.863 13.44c1.477 1.58 2.366 3.8 2.632 6.46l.11 1.1H3.395l.11-1.1c.266-2.66 1.155-4.88 2.632-6.46C7.627 11.85 9.648 11 12 11s4.373.85 5.863 2.44zM12 2C9.791 2 8 3.79 8 6s1.791 4 4 4 4-1.79 4-4-1.791-4-4-4z',
   android: 'M17.6 9.48l1.84-3.18c.16-.31.04-.69-.26-.85a.637.637 0 0 0-.83.22l-1.88 3.24a11.463 11.463 0 0 0-8.94 0L5.65 5.67a.643.643 0 0 0-.87-.2c-.28.18-.37.54-.22.83L6.4 9.48A10.78 10.78 0 0 0 1 18h22a10.78 10.78 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z',
+  mail: 'M1.998 5.5c0-1.381 1.119-2.5 2.5-2.5h15c1.381 0 2.5 1.119 2.5 2.5v13c0 1.381-1.119 2.5-2.5 2.5h-15c-1.381 0-2.5-1.119-2.5-2.5v-13zm2.5-.5c-.276 0-.5.224-.5.5v2.764l8 3.638 8-3.636V5.5c0-.276-.224-.5-.5-.5h-15zm15.5 5.463l-8 3.636-8-3.638V18.5c0 .276.224.5.5.5h15c.276 0 .5-.224.5-.5v-8.037z',
+  mailFill: 'M1.998 4.499c0-.828.671-1.499 1.5-1.499h17c.828 0 1.5.671 1.5 1.499v2.858l-10 4.545-10-4.547V4.499zm0 5.053V19.5c0 .828.671 1.5 1.5 1.5h17c.828 0 1.5-.672 1.5-1.5V9.554l-10 4.545-10-4.547z',
+  send: 'M2.504 21.866l.526-2.108C3.04 19.719 4 15.823 4 12s-.96-7.719-.97-7.757l-.527-2.109L22.236 12 2.504 21.866zM5.981 13c-.072 1.962-.34 3.833-.583 5.183L17.764 12 5.398 5.818c.242 1.349.51 3.221.583 5.183H10v2H5.981z',
   logout: 'M16 13v-2H7V8l-5 4 5 4v-3h9zM20 3h-9c-1.103 0-2 .897-2 2v4h2V5h9v14h-9v-4H9v4c0 1.103.897 2 2 2h9c1.103 0 2-.897 2-2V5c0-1.103-.897-2-2-2z',
 };
 const ic = (name, cls = 'icon') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true"><path d="${P[name]}"/></svg>`;
@@ -77,7 +80,7 @@ function appBanner() {
 }
 
 // ---------- state & api ----------
-const state = { me: null, unread: 0, homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false } };
+const state = { me: null, unread: 0, dmUnread: 0, chat: null, convs: [], homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false } };
 async function api(method, url, body) {
   const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body instanceof FormData) opts.body = body;
@@ -129,6 +132,7 @@ const routes = [
   [/^\/home$/, () => viewHome()],
   [/^\/explore$/, () => viewExplore()],
   [/^\/notifications$/, () => viewNotifications()],
+  [/^\/messages(?:\/(\d+))?$/, (m) => viewMessages(m[1] ? +m[1] : null)],
   [/^\/search$/, () => viewSearch()],
   [/^\/post\/(\d+)$/, (m) => viewPost(m[1])],
   [/^\/u\/([\w.]+)\/(followers|following)$/, (m) => viewFollowList(m[1], m[2])],
@@ -158,9 +162,13 @@ document.addEventListener('click', (e) => {
 function closeMenus() { $$('.dropdown,.menu').forEach(d => d.remove()); }
 
 // ---------- shell (3-column layout) ----------
-function shell(center, { active = '' } = {}) {
+function shell(center, { active = '', layout = '' } = {}) {
   const me = state.me;
-  const navItem = (href, key, icon, iconOn, label) => `<a class="nav-item ${active === key ? 'active' : ''}" href="${href}" data-link>${ic(active === key && iconOn ? iconOn : icon)}${key === 'notifications' && state.unread ? `<span class="badge">${state.unread > 99 ? '99+' : state.unread}</span>` : ''}<span class="lbl">${label}</span></a>`;
+  if (layout !== 'dm') state.chat = null;
+  document.body.classList.toggle('dm-page', layout === 'dm');
+  document.body.classList.remove('dm-chat-open');
+  const badge = (key) => key === 'notifications' && state.unread ? `<span class="badge">${state.unread > 99 ? '99+' : state.unread}</span>` : key === 'messages' ? dmBadge() : '';
+  const navItem = (href, key, icon, iconOn, label) => `<a class="nav-item ${active === key ? 'active' : ''}" href="${href}" data-link>${ic(active === key && iconOn ? iconOn : icon)}${badge(key)}<span class="lbl">${label}</span></a>`;
   $('#app').innerHTML = `
   <div class="layout">
     <header class="nav">
@@ -168,12 +176,13 @@ function shell(center, { active = '' } = {}) {
       ${navItem('/home', 'home', 'home', 'homeFill', 'Home')}
       ${navItem('/explore', 'explore', 'search', null, 'Explore')}
       ${navItem('/notifications', 'notifications', 'bell', null, 'Notifications')}
+      ${navItem('/messages', 'messages', 'mail', 'mailFill', 'Messages')}
       ${navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
       ${navAppLink()}
       <button class="btn btn-primary btn-big" data-action="compose">${ic('feather')}<span class="lbl">Post</span></button>
       <div class="me-chip" data-action="me-menu">${avatar(me)}<div class="who"><div style="font-weight:700">${esc(me.name)}</div><div style="color:var(--muted)">@${esc(me.username)}</div></div><span class="dots">${ic('dots')}</span></div>
     </header>
-    <main class="main">
+    <main class="main ${layout === 'dm' ? 'dm-main' : ''}">
       <div class="mobile-top">
         <a href="/u/${esc(me.username)}" data-link>${avatar(me, 'sm')}</a>
         <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}</a>
@@ -181,19 +190,20 @@ function shell(center, { active = '' } = {}) {
       </div>
       <div id="center">${center}</div>
     </main>
-    <aside class="side">
+    ${layout === 'dm' ? '' : `<aside class="side">
       <div class="searchbox"><form class="search" data-form="search">${ic('search')}<input name="q" placeholder="Search" autocomplete="off" value="${esc(new URLSearchParams(location.search).get('q') || '')}"></form></div>
       ${sideAppCard()}
       <div class="card" id="trends"><h2>What’s happening</h2>${loader()}</div>
       <div class="card" id="wtf"><h2>Who to follow</h2>${loader()}</div>
       <div class="footer-note">ZuZu · a demo social app</div>
-    </aside>
+    </aside>`}
   </div>
   <button class="fab" data-action="compose" aria-label="Post">${ic('feather')}</button>
   <nav class="bottom-nav">
     <a href="/home" data-link>${ic(active === 'home' ? 'homeFill' : 'home')}</a>
     <a href="/explore" data-link>${ic('search')}</a>
-    <a href="/notifications" data-link>${ic('bell')}${state.unread ? `<span class="badge">${state.unread}</span>` : ''}</a>
+    <a href="/notifications" data-link aria-label="Notifications">${ic('bell')}${state.unread ? `<span class="badge">${state.unread}</span>` : ''}</a>
+    <a href="/messages" data-link aria-label="Messages">${ic(active === 'messages' ? 'mailFill' : 'mail')}${dmBadge()}</a>
     <a href="/u/${esc(me.username)}" data-link>${ic(active === 'profile' ? 'userFill' : 'user')}</a>
   </nav>`;
   loadSidebar();
@@ -596,7 +606,7 @@ async function viewProfile(username, tab) {
   $('#profile').innerHTML = `
     <div class="banner" style="${u.banner ? `background-image:url(${esc(u.banner)})` : ''}"></div>
     <div class="pf">
-      <div class="top">${avatar(u, 'lg')}${isMe ? `<button class="btn btn-outline" data-action="edit-profile">Edit profile</button>` : followBtn(u)}</div>
+      <div class="top">${avatar(u, 'lg')}${isMe ? `<button class="btn btn-outline" data-action="edit-profile">Edit profile</button>` : `<div class="pf-actions"><button class="btn btn-outline btn-icon" data-action="dm-user" data-username="${esc(u.username)}" aria-label="Message" title="Message">${ic('mail')}</button>${followBtn(u)}</div>`}</div>
       <div class="name">${esc(u.name)}</div>
       <div class="handle">@${esc(u.username)}${u.follows_you ? '<span class="follows-you">Follows you</span>' : ''}</div>
       ${u.bio ? `<div class="bio">${richText(u.bio)}</div>` : '<div style="height:12px"></div>'}
@@ -617,14 +627,313 @@ async function viewFollowList(username, which) {
   } catch (err) { $('#list').innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
 }
 
+// ---------- direct messages ----------
+const DM_MAX = 1000;
+const DM_POLL_CHAT = 3000, DM_POLL_BADGE = 15000;
+// Escape everything, then turn http(s) URLs into links (href is the escaped, protocol-checked URL).
+function linkify(t) {
+  const re = /\bhttps?:\/\/[^\s<>"']+/gi;
+  let out = '', last = 0, m;
+  while ((m = re.exec(t))) {
+    let url = m[0];
+    const trail = url.match(/[.,!?;:)\]}]+$/);
+    if (trail) url = url.slice(0, -trail[0].length);
+    re.lastIndex = m.index + url.length;
+    let okUrl = false;
+    try { okUrl = /^https?:$/.test(new URL(url).protocol); } catch {}
+    out += esc(t.slice(last, m.index)) + (okUrl
+      ? `<a class="link" href="${esc(url)}" target="_blank" rel="noopener noreferrer nofollow ugc">${esc(url.length > 60 ? url.slice(0, 60) + '…' : url)}</a>`
+      : esc(url));
+    last = m.index + url.length;
+  }
+  return out + esc(t.slice(last));
+}
+const dmBadge = () => state.dmUnread ? `<span class="badge" data-dm-badge>${state.dmUnread > 99 ? '99+' : state.dmUnread}</span>` : '';
+function setDmUnread(n) {
+  state.dmUnread = n || 0;
+  $$('.nav a[href="/messages"], .bottom-nav a[href="/messages"]').forEach(a => {
+    $('[data-dm-badge]', a)?.remove();
+    if (state.dmUnread) $('svg', a).insertAdjacentHTML('afterend', dmBadge());
+  });
+}
+const msgTime = (ts) => new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+function dayLabel(ts) {
+  const d = new Date(ts), n = new Date(), y = new Date(Date.now() - 864e5);
+  if (d.toDateString() === n.toDateString()) return 'Today';
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(d.getFullYear() !== n.getFullYear() ? { year: 'numeric' } : {}) });
+}
+
+async function viewMessages(id) {
+  if (!$('#dm')) {
+    shell(`<div class="dm" id="dm">
+      <section class="dm-list">
+        <div class="header"><div class="header-row"><h1>Messages</h1></div>
+          <div class="dm-new"><form class="search" data-form="dm-new" autocomplete="off">${ic('search')}<input name="q" placeholder="Search people to message" aria-label="Search people to message" autocapitalize="none" spellcheck="false"></form>
+          <div class="dm-results" id="dm-results" hidden></div></div></div>
+        <div id="dm-convs">${loader()}</div>
+      </section>
+      <section class="dm-chat" id="dm-chat"></section>
+    </div>`, { active: 'messages', layout: 'dm' });
+    loadConversations();
+  }
+  $('#dm').classList.toggle('has-chat', !!id);
+  document.body.classList.toggle('dm-chat-open', !!id);
+  $$('.dm-conv').forEach(r => r.classList.toggle('active', +r.dataset.conv === id));
+  if (id) openChat(id);
+  else {
+    state.chat = null;
+    $('#dm-chat').innerHTML = `<div class="dm-pick"><h2>Select a message</h2><p>Choose from your existing conversations, or start a new one.</p><button class="btn btn-primary" data-action="dm-focus-new">New message</button></div>`;
+  }
+}
+
+function convRow(c) {
+  const lm = c.last_message, mine = lm && lm.sender_id === state.me.id;
+  const preview = !lm ? 'No messages yet' : (mine ? 'You: ' : '') + (lm.text || (lm.has_image ? '📷 Photo' : ''));
+  const active = state.chat && state.chat.id === c.id;
+  return `<a class="dm-conv ${c.unread ? 'unread' : ''} ${active ? 'active' : ''}" href="/messages/${c.id}" data-link data-conv="${c.id}">
+    ${avatar(c.user)}<div class="who"><div class="top"><span class="n">${esc(c.user.name)}</span><span class="h">@${esc(c.user.username)}</span><span class="t">· ${ago(c.updated_at)}</span></div>
+    <div class="pv">${esc(preview)}</div></div>${c.unread ? `<span class="dm-dot" title="${c.unread} unread">${c.unread > 99 ? '99+' : c.unread}</span>` : ''}</a>`;
+}
+async function loadConversations() {
+  const el = $('#dm-convs'); if (!el) return;
+  try {
+    const { conversations } = await api('GET', '/api/dm/conversations');
+    if ($('#dm-convs') !== el) return;
+    state.convs = conversations;
+    el.innerHTML = conversations.length ? conversations.map(convRow).join('')
+      : `<div class="empty"><h3>Welcome to your inbox!</h3><p>Drop a line, share posts and more with private conversations between you and others on ZuZu.</p></div>`;
+    if (state.chat && !state.chat.other) {
+      const c = conversations.find(x => x.id === state.chat.id); if (c) chatHeader(c.user);
+    }
+  } catch (err) { el.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+
+// "New message" search: matching users appear under the box; picking one opens (or creates) the chat.
+let dmSearchT;
+async function dmSearch(q) {
+  const box = $('#dm-results'); if (!box) return;
+  q = q.trim().replace(/^@/, '');
+  if (!q) { box.hidden = true; box.innerHTML = ''; return; }
+  try {
+    const { users } = await api('GET', '/api/search?q=' + encodeURIComponent(q));
+    const list = users.filter(u => u.id !== state.me.id).slice(0, 8);
+    if ($('form[data-form="dm-new"] input')?.value.trim().replace(/^@/, '') !== q) return;
+    box.innerHTML = list.length
+      ? list.map(u => `<button type="button" class="dm-result" data-action="dm-user" data-username="${esc(u.username)}">${avatar(u)}<div class="who"><div class="n">${esc(u.name)}</div><div class="h">@${esc(u.username)}</div></div></button>`).join('')
+      : `<div class="dm-none">No people found for “${esc(q)}”</div>`;
+    box.hidden = false;
+  } catch {}
+}
+async function startDm(username) {
+  const { conversation } = await api('POST', '/api/dm/conversations', { username });
+  go('/messages/' + conversation.id);
+}
+
+function chatHeader(u) {
+  const head = $('#dm-chat .dm-chat-head'); if (!head || !state.chat) return;
+  state.chat.other = u;
+  head.innerHTML = `<button class="back dm-back" data-action="dm-back" aria-label="Back to messages">${ic('back')}</button>
+    <a class="dm-peer" href="/u/${esc(u.username)}" data-link>${avatar(u, 'sm')}<div class="who"><div class="n">${esc(u.name)}</div><div class="h">@${esc(u.username)}</div></div></a>`;
+}
+async function openChat(id) {
+  if (state.chat && state.chat.id === id && $('#dm-msgs')) return;
+  const c = state.chat = { id, other: null, msgs: new Map(), lastId: 0, hasMore: false, otherRead: 0, stick: true, loaded: false };
+  $('#dm-chat').innerHTML = `<div class="dm-chat-head"><button class="back dm-back" data-action="dm-back" aria-label="Back to messages">${ic('back')}</button></div>
+    <div class="dm-msgs" id="dm-msgs">${loader()}</div>
+    <form class="dm-compose" data-form="dm-send" id="dm-compose">
+      <div class="dm-preview" hidden><img alt=""><button type="button" class="x" data-action="dm-clear-image" aria-label="Remove image">${ic('close')}</button></div>
+      <div class="dm-bar">
+        <label class="tool" title="Add photo" aria-label="Add photo">${ic('image')}<input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label>
+        <textarea name="text" rows="1" placeholder="Start a new message" aria-label="Message" enterkeyhint="send"></textarea>
+        <span class="dm-count"></span>
+        <button class="send" type="submit" aria-label="Send" title="Send (Enter)" disabled>${ic('send')}</button>
+      </div>
+    </form>`;
+  const cached = (state.convs || []).find(x => x.id === id);
+  if (cached) chatHeader(cached.user);
+  const el = $('#dm-msgs');
+  el.addEventListener('scroll', () => {
+    c.stick = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (el.scrollTop < 80 && c.hasMore) loadOlder(c);
+  });
+  try {
+    const [conv, page] = await Promise.all([
+      cached ? null : api('GET', '/api/dm/conversations/' + id),
+      api('GET', `/api/dm/conversations/${id}/messages?limit=30`),
+    ]);
+    if (state.chat !== c) return;
+    if (conv) chatHeader(conv.conversation.user);
+    addMsgs(c, page.messages); c.hasMore = page.has_more; c.otherRead = page.other_last_read_at; c.loaded = true;
+    renderChat(c, { toBottom: true });
+    if (!matchMedia('(hover:none)').matches) $('#dm-compose textarea')?.focus();
+    markRead(c);
+  } catch (err) {
+    if (state.chat !== c) return;
+    state.chat = null;
+    $('#dm-chat').innerHTML = `<div class="dm-chat-head"><button class="back dm-back" data-action="dm-back" aria-label="Back to messages">${ic('back')}</button></div>
+      <div class="empty"><h3>Conversation not found</h3><p>${esc(err.message)}</p></div>`;
+  }
+}
+function addMsgs(c, list) {
+  let added = false;
+  for (const m of list) { if (!c.msgs.has(m.id)) { c.msgs.set(m.id, m); added = true; } if (m.id > c.lastId) c.lastId = m.id; }
+  return added;
+}
+function msgHTML(c, m, prev, next, lastMineId) {
+  const mine = m.sender_id === state.me.id;
+  const end = !next || next.sender_id !== m.sender_id || next.created_at - m.created_at > 5 * 60e3 || dayLabel(next.created_at) !== dayLabel(m.created_at);
+  const seen = mine && m.id === lastMineId && c.otherRead >= m.created_at;
+  const day = !prev || dayLabel(prev.created_at) !== dayLabel(m.created_at) ? `<div class="dm-day">${esc(dayLabel(m.created_at))}</div>` : '';
+  return `${day}<div class="msg ${mine ? 'mine' : 'theirs'} ${end ? 'end' : ''}" data-msg="${m.id}">
+    <div class="row">${mine ? `<button class="msg-del" data-action="dm-delete" data-id="${m.id}" aria-label="Delete message" title="Delete">${ic('trash')}</button>` : ''}
+      <div class="content" title="${esc(fullDate(m.created_at))}">${m.image ? `<a class="dm-media" href="${esc(m.image)}" target="_blank" rel="noopener"><img class="dm-img" src="${esc(m.image)}" alt="Image"></a>` : ''}${m.text ? `<div class="bubble">${linkify(m.text)}</div>` : ''}</div></div>
+    ${end || seen ? `<div class="meta">${end ? `<time>${esc(msgTime(m.created_at))}</time>` : ''}${seen ? `${end ? ' · ' : ''}<span class="seen">Seen</span>` : ''}</div>` : ''}
+  </div>`;
+}
+function renderChat(c, { toBottom = false, keepFromBottom = null } = {}) {
+  const el = $('#dm-msgs'); if (!el || state.chat !== c) return;
+  const list = [...c.msgs.values()].sort((a, b) => a.id - b.id);
+  const lastMine = list.filter(m => m.sender_id === state.me.id).pop();
+  const u = c.other;
+  el.innerHTML = (c.hasMore ? `<div class="dm-older"><button class="btn btn-outline" data-action="dm-older">${c.loadingOlder ? 'Loading…' : 'Load older messages'}</button></div>` : '')
+    + (list.length ? list.map((m, i) => msgHTML(c, m, list[i - 1], list[i + 1], lastMine && lastMine.id)).join('')
+      : `<div class="dm-hello">${u ? avatar(u, 'lg') + `<div class="n">${esc(u.name)}</div><div class="h">@${esc(u.username)}</div>` : ''}<p>Say hi 👋</p></div>`);
+  if (keepFromBottom != null) el.scrollTop = el.scrollHeight - keepFromBottom;
+  else if (toBottom) { el.scrollTop = el.scrollHeight; c.stick = true; }
+}
+async function loadOlder(c) {
+  if (c.loadingOlder || !c.hasMore) return;
+  c.loadingOlder = true;
+  const el = $('#dm-msgs'); const b = $('.dm-older button', el); if (b) b.textContent = 'Loading…';
+  try {
+    const first = Math.min(...c.msgs.keys());
+    const page = await api('GET', `/api/dm/conversations/${c.id}/messages?before=${first}&limit=30`);
+    if (state.chat !== c) return;
+    const fromBottom = el.scrollHeight - el.scrollTop;
+    addMsgs(c, page.messages); c.hasMore = page.has_more;
+    c.loadingOlder = false;
+    renderChat(c, { keepFromBottom: fromBottom });
+  } catch (err) { toast(err.message); } finally { c.loadingOlder = false; }
+}
+async function markRead(c) {
+  if (document.hidden || state.chat !== c || !c.lastId) return;
+  try {
+    const { unread } = await api('POST', `/api/dm/conversations/${c.id}/read`, { up_to: c.lastId });
+    setDmUnread(unread);
+    const row = $(`.dm-conv[data-conv="${c.id}"]`);
+    if (row) { row.classList.remove('unread'); $('.dm-dot', row)?.remove(); }
+  } catch {}
+}
+async function pollChat() {
+  const c = state.chat;
+  if (!c || !c.loaded || c.polling || document.hidden || !$('#dm-msgs') || location.pathname !== '/messages/' + c.id) return;
+  c.polling = true;
+  try {
+    const r = await api('GET', `/api/dm/conversations/${c.id}/messages?after=${c.lastId}&limit=100`);
+    if (state.chat !== c) return;
+    const added = addMsgs(c, r.messages);
+    const seenChanged = r.other_last_read_at !== c.otherRead;
+    c.otherRead = r.other_last_read_at;
+    if (added || seenChanged) {
+      const el = $('#dm-msgs');
+      renderChat(c, c.stick ? { toBottom: true } : { keepFromBottom: el.scrollHeight - el.scrollTop });
+    }
+    if (r.messages.some(m => m.sender_id !== state.me.id)) { markRead(c); loadConversations(); }
+  } catch {} finally { c.polling = false; }
+}
+async function pollDmUnread() {
+  if (!state.me || document.hidden) return;
+  try { const { unread } = await api('GET', '/api/dm/unread'); setDmUnread(unread); } catch {}
+  if ($('#dm-convs')) loadConversations();
+}
+setInterval(pollChat, DM_POLL_CHAT);
+setInterval(pollDmUnread, DM_POLL_BADGE);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.me) { pollChat(); pollDmUnread(); } });
+// Keep the chat pinned to the bottom while images load.
+document.addEventListener('load', (e) => {
+  if (e.target.tagName === 'IMG' && e.target.closest('#dm-msgs') && state.chat && state.chat.stick) { const el = $('#dm-msgs'); el.scrollTop = el.scrollHeight; }
+}, true);
+
+function updateDmComposer(f) {
+  const ta = f.text, len = [...ta.value].length;
+  ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px';
+  const cnt = $('.dm-count', f);
+  cnt.textContent = len > DM_MAX - 100 ? `${DM_MAX - len}` : '';
+  cnt.classList.toggle('over', len > DM_MAX);
+  $('.send', f).disabled = (!ta.value.trim() && !f.image.files.length) || len > DM_MAX || f.dataset.busy === '1';
+}
+function clearDmImage(f) { f.image.value = ''; $('.dm-preview', f).hidden = true; updateDmComposer(f); }
+async function sendDm(f) {
+  const c = state.chat; if (!c || f.dataset.busy === '1') return;
+  const text = f.text.value, file = f.image.files[0];
+  if ((!text.trim() && !file) || [...text].length > DM_MAX) return;
+  f.dataset.busy = '1'; updateDmComposer(f);
+  const fd = new FormData(); fd.append('text', text); if (file) fd.append('image', file);
+  try {
+    const { message } = await api('POST', `/api/dm/conversations/${c.id}/messages`, fd);
+    f.text.value = ''; clearDmImage(f);
+    if (state.chat === c) { addMsgs(c, [message]); renderChat(c, { toBottom: true }); }
+    loadConversations();
+  } catch (err) { toast(err.message); }
+  finally { f.dataset.busy = ''; updateDmComposer(f); if (!matchMedia('(hover:none)').matches) f.text.focus(); }
+}
+document.addEventListener('input', (e) => {
+  const f = e.target.closest('form[data-form="dm-send"]'); if (f) return updateDmComposer(f);
+  if (e.target.closest('form[data-form="dm-new"]')) { clearTimeout(dmSearchT); const v = e.target.value; dmSearchT = setTimeout(() => dmSearch(v), 200); }
+});
+document.addEventListener('change', (e) => {
+  const f = e.target.closest('form[data-form="dm-send"]');
+  if (!f || e.target.name !== 'image') return;
+  const file = e.target.files[0];
+  if (file && file.size > 5 * 1024 * 1024) { toast('Image must be under 5 MB'); clearDmImage(f); return; }
+  if (file && !/^image\/(png|jpe?g|gif|webp)$/.test(file.type)) { toast('Only images can be sent'); clearDmImage(f); return; }
+  if (file) { $('.dm-preview img', f).src = URL.createObjectURL(file); $('.dm-preview', f).hidden = false; }
+  updateDmComposer(f);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  const f = e.target.closest('form[data-form="dm-send"]');
+  if (f && e.target.name === 'text') { e.preventDefault(); sendDm(f); }
+});
+document.addEventListener('submit', async (e) => {
+  const f = e.target;
+  if (f.dataset.form === 'dm-send') { e.preventDefault(); sendDm(f); }
+  else if (f.dataset.form === 'dm-new') {
+    e.preventDefault();
+    const q = f.q.value.trim().replace(/^@/, ''); if (!q) return;
+    const first = $('#dm-results .dm-result');
+    try { await startDm(first ? first.dataset.username : q); } catch (err) { toast(err.message); }
+  }
+});
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action^="dm-"]'); if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  const a = el.dataset.action;
+  try {
+    if (a === 'dm-user') { el.disabled = true; await startDm(el.dataset.username); }
+    else if (a === 'dm-back') go('/messages');
+    else if (a === 'dm-focus-new') $('form[data-form="dm-new"] input')?.focus();
+    else if (a === 'dm-older') { if (state.chat) loadOlder(state.chat); }
+    else if (a === 'dm-clear-image') clearDmImage(el.closest('form'));
+    else if (a === 'dm-delete') {
+      const c = state.chat, id = +el.dataset.id; if (!c) return;
+      if (!confirm('Delete message? It will be removed for both of you.')) return;
+      await api('DELETE', '/api/dm/messages/' + id);
+      c.msgs.delete(id); renderChat(c); toast('Message deleted'); loadConversations();
+    }
+  } catch (err) { el.disabled = false; toast(err.message); }
+}, true);
+
 // ---------- boot ----------
 async function refreshMe() {
-  try { const r = await api('GET', '/api/me'); state.me = r.user; state.unread = r.unread || 0; } catch { state.me = null; }
+  try { const r = await api('GET', '/api/me'); state.me = r.user; state.unread = r.unread || 0; state.dmUnread = r.dm_unread || 0; } catch { state.me = null; }
 }
 setInterval(async () => {
   if (!state.me || document.hidden) return;
   const before = state.unread; await refreshMe();
-  if (state.unread !== before) $$('.nav-item .badge, .bottom-nav .badge').forEach(b => b.textContent = state.unread);
+  if (state.unread !== before) $$('a[href="/notifications"] .badge').forEach(b => b.textContent = state.unread);
+  setDmUnread(state.dmUnread);
   if (state.unread && !before && location.pathname !== '/notifications') {
     $$('a[href="/notifications"]').forEach(a => { if (!$('.badge', a)) a.insertAdjacentHTML('beforeend', `<span class="badge">${state.unread}</span>`); });
   }

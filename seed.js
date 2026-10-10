@@ -75,7 +75,55 @@ async function seed(client) {
   console.log('Seeded', users.length, 'users,', posts.length, 'posts. Login: demo / demo1234 (all demo users share this password)');
   return true;
 }
-module.exports = { seed };
+// Demo DMs: added only when there are no DM conversations at all and the demo users exist.
+// Never touches existing data. [user, text, minutesAgo] per message; readUpTo = minutes-ago each side has read up to.
+const dms = [
+  { pair: ['akhil', 'demo'], msgs: [
+    ['akhil', 'Hey! Welcome to ZuZu 👋', 300],
+    ['demo', 'Thanks! Loving it so far.', 295],
+    ['akhil', 'DMs just shipped. Tell me if anything breaks 🙏', 40],
+    ['akhil', 'Docs are here: https://zuzu-app.onrender.com', 39],
+  ], read: { akhil: 0, demo: 290 } },
+  { pair: ['priya_codes', 'demo'], msgs: [
+    ['priya_codes', 'Saw your first post! Want to pair on a side project this weekend?', 200],
+    ['demo', 'Yes! What stack?', 190],
+    ['priya_codes', 'Express + Postgres. Keep it boring ☕', 185],
+    ['demo', 'Perfect, see you Saturday', 180],
+  ], read: { priya_codes: 0, demo: 0 } },
+  { pair: ['spacenerd', 'design_ananya'], msgs: [
+    ['spacenerd', 'Could you design a poster for the stargazing meetup? 🔭', 120],
+    ['design_ananya', 'Only if I get to pick the font 😄', 110],
+  ], read: { spacenerd: 0, design_ananya: 0 } },
+];
+async function seedDMs(client) {
+  const { rows: [{ n }] } = await client.query('SELECT COUNT(*)::int n FROM dm_conversations');
+  if (n > 0) return false;
+  const names = [...new Set(dms.flatMap(d => d.pair))];
+  const { rows } = await client.query('SELECT id, lower(username) u FROM users WHERE lower(username) = ANY($1::text[])', [names.map(x => x.toLowerCase())]);
+  const ids = Object.fromEntries(rows.map(r => [r.u, r.id]));
+  const T0 = Date.now();
+  let made = 0;
+  for (const d of dms) {
+    const [x, y] = d.pair.map(u => ids[u.toLowerCase()]);
+    if (!x || !y) continue;
+    const created = T0 - d.msgs[0][2] * 60000 - 1000;
+    const last = T0 - d.msgs[d.msgs.length - 1][2] * 60000;
+    const { rows: [c] } = await client.query(
+      'INSERT INTO dm_conversations(user_a,user_b,created_by,created_at,last_message_at) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+      [Math.min(x, y), Math.max(x, y), ids[d.msgs[0][0].toLowerCase()], created, last]);
+    for (const u of d.pair) {
+      const readAt = T0 - d.read[u] * 60000;
+      await client.query('INSERT INTO dm_members(conversation_id,user_id,last_read_at) VALUES ($1,$2,$3)', [c.id, ids[u.toLowerCase()], d.read[u] ? readAt : last]);
+    }
+    for (const [u, text, m] of d.msgs) {
+      await client.query('INSERT INTO dm_messages(conversation_id,sender_id,text,created_at) VALUES ($1,$2,$3,$4)', [c.id, ids[u.toLowerCase()], text, T0 - m * 60000]);
+    }
+    made++;
+  }
+  if (made) console.log('Seeded', made, 'demo DM conversations');
+  return made > 0;
+}
+module.exports = { seed, seedDMs };
 
 // `node seed.js`: create schema + seed if the database is empty (same as server startup, without listening).
 if (require.main === module) {
