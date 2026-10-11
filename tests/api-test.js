@@ -73,6 +73,7 @@ function client() {
   await aiTests();
   await googleTests();
   await adminTests();
+  await idealTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
 
@@ -149,7 +150,7 @@ async function googleTests() {
     // new user
     const email = `Goo.Gler${rnd}+zuzu@Example.com`;
     res = await googleLogin({ sub: 'new' + rnd, email, name: 'Goo Gler', picture: 'https://lh3.googleusercontent.com/a/abc=s96-c' });
-    ok(res.status === 302 && res.location === '/home' && res.sid, 'new Google user signed in -> /home');
+    ok(res.status === 302 && res.location === '/home?ideal=1' && res.sid, 'new Google user signed in -> /home?ideal=1 (opens "Choose your ideal" once)');
     let u = await me(res.sid);
     ok(u && u.username === `goo.gler${rnd}` && u.name === 'Goo Gler', 'username derived from email: @' + (u && u.username));
     ok(u && u.avatar === 'https://lh3.googleusercontent.com/a/abc=s400-c', 'Google photo stored as avatar URL');
@@ -157,7 +158,7 @@ async function googleTests() {
     const row = await pg.query('SELECT * FROM users WHERE id=$1', [u.id]);
     ok(row.rows[0].google_id === 'new' + rnd && row.rows[0].email === email.toLowerCase() && row.rows[0].password_hash === null, 'stored google_id + email, no password');
     res = await googleLogin({ sub: 'new' + rnd, email, name: 'Changed Name' });
-    ok((await me(res.sid)).id === u.id, 'returning Google user -> same account (by google_id)');
+    ok((await me(res.sid)).id === u.id && res.location === '/home', 'returning Google user -> same account (by google_id), plain /home');
     r = await fetch(GB + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: u.username, password: 'anything' }) });
     const lj = await r.json();
     ok(r.status === 401 && /Google/.test(lj.error), 'password login on Google-only account rejected cleanly: ' + lj.error);
@@ -633,8 +634,129 @@ async function adminTests() {
     ok(b1.posts.total - b0.posts.total === 2 && b1.posts.today - b0.posts.today === 2 && b1.posts.replies_today - b0.posts.replies_today === 1, 'posts total/today +2 (incl. 1 reply)');
     ok(b1.dms.total - b0.dms.total === 1 && b1.dms.today - b0.dms.today === 1, 'DMs total/today +1');
     ok(b1.active_users_today - b0.active_users_today === 3, 'active users today +3 (poster, replier, DM sender)');
+
+    // "Choose your ideal" breakdown (real users only; per ideal and per primary quality)
+    const i0 = (await stats()).ideals;
+    ok(i0 && Array.isArray(i0.by_ideal) && i0.by_quality.length === 10 && i0.by_quality.every(q => /^#[0-9A-F]{6}$/i.test(q.color)), 'stats.ideals: by_ideal + by_quality (all 10 qualities with colours)');
+    const custName = 'Admin Test Ideal ' + rnd;
+    const sign = async (name, ideal) => { made.push(name); return (await mk(on.url)('POST', '/api/signup', { username: name, password: 'secret123', ideal })).status; };
+    const st = [await sign('idk1' + rnd, { presetId: 'kalam' }), await sign('idk2' + rnd, { presetId: 'kalam' }), await sign('idg1' + rnd, { presetId: 'gandhi' }),
+      await sign('idc1' + rnd, { custom: { name: custName, qualities: ['courage', 'wisdom'] } }), await sign('idc2' + rnd, { custom: { name: custName.toUpperCase(), qualities: ['courage'] } }),
+      await sign('idn1' + rnd, undefined)];
+    await ins('iddemo' + rnd, Date.now(), { demo: true }); await pg.query("UPDATE users SET ideal_name='APJ Abdul Kalam', ideal_preset_id='kalam', ideal_qualities='{innovation}' WHERE username=$1", ['iddemo' + rnd]);
+    ok(st.every(x => x === 200), 'signed up 5 users with ideals + 1 without (+1 demo user with an ideal)');
+    const i1 = (await stats()).ideals;
+    const cnt = (l, f) => (l.find(f) || { count: 0 }).count;
+    const dI = (f) => cnt(i1.by_ideal, f) - cnt(i0.by_ideal, f), dQ = (k) => cnt(i1.by_quality, q => q.quality === k) - cnt(i0.by_quality, q => q.quality === k);
+    ok(dI(x => x.preset_id === 'kalam') === 2 && dI(x => x.preset_id === 'gandhi') === 1, 'per ideal: Kalam +2, Gandhi +1 (demo excluded)');
+    const cust = i1.by_ideal.find(x => x.custom && x.name.toLowerCase() === custName.toLowerCase());
+    ok(cust && cust.count === 2 && cust.primary === 'courage' && cust.color === '#EF4444', 'per ideal: custom names grouped case-insensitively (2), coloured by primary quality');
+    ok(dQ('innovation') === 2 && dQ('peace') === 1 && dQ('courage') === 2 && dQ('wisdom') === 0, 'per primary quality: innovation +2, peace +1, courage +2 (secondary qualities not counted)');
+    ok(i1.users_with_ideal - i0.users_with_ideal === 5 && i1.users_without_ideal - i0.users_without_ideal === 1 && i1.custom - i0.custom === 2, 'totals: +5 with an ideal, +1 without, +2 custom');
+    const ai1 = await (await fetch(on.url + '/api/admin/stats', { headers: { cookie: '' } })); ok(ai1.status === 404, 'ideal breakdown still admin-only (404 logged out)');
   } finally {
     await pg.query('DELETE FROM users WHERE lower(username) = ANY($1)', [made.map(x => x.toLowerCase())]).catch(() => {});
     await pg.end(); on.child.kill(); off.child.kill();
   }
+}
+
+// ---------- Choose your ideal ----------
+async function idealTests() {
+  console.log('\n  Choose your ideal');
+  const I = require('../ideals');
+  const shared = require('../public/ideals.js');
+  const rnd = Math.floor(Math.random() * 1e6);
+  // palette + presets
+  let r = await fetch(BASE + '/api/ideals'); const cat = await r.json();
+  ok(r.status === 200 && cat.qualities.length === 10 && cat.qualities.every(q => /^#[0-9A-F]{6}$/i.test(q.color)), 'GET /api/ideals: 10 qualities, each with a colour');
+  ok(new Set(cat.qualities.map(q => q.color.toLowerCase())).size === 10, 'every quality has its own colour');
+  const keys = new Set(cat.qualities.map(q => q.key));
+  ok(cat.presets.length >= 12 && cat.presets.every(p => p.id && p.name && p.desc && keys.has(p.primary) && (p.secondary || []).length <= 2 && (p.secondary || []).every(k => keys.has(k))), `${cat.presets.length} presets, each with a one-liner, valid primary + <=2 secondary qualities`);
+  ok(new Set(cat.presets.map(p => p.id)).size === cat.presets.length, 'preset ids are unique');
+  ok(JSON.stringify(cat.presets) === JSON.stringify(shared.PRESETS), 'server serves the same presets as public/ideals.js (single data file)');
+  const lum = (hex) => { const c = hex.match(/\w\w/g).map(x => parseInt(x, 16) / 255).map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+  ok(cat.qualities.every(q => (lum(q.color) + 0.05) / 0.05 >= 4.5), 'all quality colours have >= 4.5:1 contrast on the black UI');
+  const sw = await (await fetch(BASE + '/sw.js')).text();
+  ok(/const CACHE = 'zuzu-v6'/.test(sw) && sw.includes("'/ideals.js'"), 'service worker cache bumped to zuzu-v6 and caches /ideals.js');
+  r = await fetch(BASE + '/ideals.js'); ok(r.status === 200 && /javascript/.test(r.headers.get('content-type')) && (await r.text()).includes('ZUZU_IDEALS'), '/ideals.js served to the browser');
+  ok((await (await fetch(BASE + '/')).text()).includes('<script src="/ideals.js"></script>'), 'index.html loads /ideals.js');
+
+  // unit: parseIdeal
+  const bad = (v) => { try { I.parseIdeal(v); return false; } catch (e) { return e.status === 400; } };
+  ok(I.parseIdeal(undefined) === null && I.parseIdeal(null) === null && I.parseIdeal({ skip: true }) === null, 'no ideal / skip -> null');
+  ok(bad('kalam') && bad([1]) && bad({}) && bad({ presetId: 'nobody' }) && bad({ custom: 'x' }), 'malformed / unknown preset rejected');
+  ok(I.parseIdeal({ custom: { name: ' a ', qualities: ['wisdom', 'wisdom', 'courage'] } }).qualities.join() === 'wisdom,courage', 'duplicate qualities collapsed (order kept)');
+  ok(bad({ custom: { name: 'x\u202Ey', qualities: ['wisdom'] } }) && bad({ custom: { name: 'a\nb\u0000', qualities: ['wisdom'] } }), 'control / bidi characters rejected');
+  ok(bad({ custom: { name: 'x', qualities: [{}] } }) && bad({ custom: { name: 'x', qualities: 'wisdom' } }), 'non-string qualities rejected');
+
+  // sign-up variants
+  const c = () => client();
+  const signup = async (cl, name, ideal) => cl('POST', '/api/signup', { username: name, password: 'secret123', name: 'Ideal ' + name, ...(ideal === undefined ? {} : { ideal }) });
+  const pre = c(), uPre = 'idpre' + rnd;
+  r = await signup(pre, uPre, { presetId: 'kalam' });
+  ok(r.status === 200 && r.data.user.ideal && r.data.user.ideal.name === 'APJ Abdul Kalam' && r.data.user.ideal.preset_id === 'kalam' && !r.data.user.ideal.custom, 'sign up with preset (Kalam)');
+  ok(r.data.user.ideal.primary === 'innovation' && r.data.user.ideal.color === '#06B6D4' && r.data.user.ideal.qualities.join() === 'innovation,wisdom,discipline', 'preset ideal: primary innovation, cyan #06B6D4, + 2 secondary qualities');
+  const cus = c(), uCus = 'idcus' + rnd;
+  r = await signup(cus, uCus, { custom: { name: '   My   Grandmother  ', qualities: ['compassion', 'discipline'] } });
+  ok(r.status === 200 && r.data.user.ideal.name === 'My Grandmother' && r.data.user.ideal.custom && r.data.user.ideal.preset_id === null, 'sign up with custom ideal (name trimmed + spaces collapsed)');
+  ok(r.data.user.ideal.primary === 'compassion' && r.data.user.ideal.color === '#EC4899' && r.data.user.ideal.qualities.join() === 'compassion,discipline', 'custom: first quality is primary and sets the colour (pink)');
+  const no = c(), uNo = 'idnone' + rnd;
+  r = await signup(no, uNo); ok(r.status === 200 && r.data.user.ideal === null, 'sign up without an ideal -> ideal: null');
+  r = await signup(c(), 'idskip' + rnd, { skip: true }); ok(r.status === 200 && r.data.user.ideal === null, 'sign up with {skip: true} -> ideal: null');
+  r = await signup(c(), 'idnull' + rnd, null); ok(r.status === 200 && r.data.user.ideal === null, 'sign up with ideal: null -> ideal: null');
+
+  const rejects = [
+    ['unknown preset', { presetId: 'someone' }],
+    ['invalid quality', { custom: { name: 'Teacher', qualities: ['wisdom', 'beauty'] } }],
+    ['no qualities', { custom: { name: 'Teacher', qualities: [] } }],
+    ['4 qualities', { custom: { name: 'Teacher', qualities: ['wisdom', 'courage', 'peace', 'justice'] } }],
+    ['name too long (41 chars)', { custom: { name: 'x'.repeat(41), qualities: ['wisdom'] } }],
+    ['empty name', { custom: { name: '   ', qualities: ['wisdom'] } }],
+    ['HTML in the name', { custom: { name: '<img src=x onerror=alert(1)>', qualities: ['courage'] } }],
+    ['HTML tag in the name', { custom: { name: 'Bold <b>Hero</b>', qualities: ['courage'] } }],
+    ['name not a string', { custom: { name: 42, qualities: ['wisdom'] } }],
+    ['not an object', 'kalam'],
+  ];
+  for (const [what, ideal] of rejects) {
+    const uname = 'idbad' + rnd + what.length;
+    r = await signup(c(), uname, ideal);
+    const after = await c()('GET', '/api/users/' + uname);
+    ok(r.status === 400 && r.data.error && after.status === 404, `sign up rejected (400, no account created): ${what} -> "${r.data.error}"`);
+  }
+  r = await signup(c(), 'idmax' + rnd, { custom: { name: 'y'.repeat(40), qualities: ['creativity'] } });
+  ok(r.status === 200 && r.data.user.ideal.name.length === 40 && r.data.user.ideal.color === '#A855F7', 'custom name of exactly 40 chars accepted (creativity purple)');
+  r = await signup(c(), 'idemoji' + rnd, { custom: { name: 'नानी माँ 🙏'.padEnd(10, '!'), qualities: ['devotion'] } });
+  ok(r.status === 200 && r.data.user.ideal.name.startsWith('नानी माँ') && r.data.user.ideal.color === '#F97316', 'Hindi / emoji names fine (saffron devotion)');
+  r = await signup(c(), 'idamp' + rnd, { custom: { name: 'Tom & "Jerry\' Fan', qualities: ['creativity'] } });
+  ok(r.status === 200 && r.data.user.ideal.name === 'Tom & "Jerry\' Fan', 'quotes/ampersands stored as plain text (escaped on display)');
+
+  // profile returns the ideal; editing changes it
+  r = await no('GET', '/api/users/' + uPre); ok(r.status === 200 && r.data.user.ideal.preset_id === 'kalam' && r.data.user.ideal.description, 'profile (GET /api/users/:u) returns the ideal + description');
+  r = await cus('GET', '/api/me'); ok(r.data.user.ideal.name === 'My Grandmother', '/api/me returns the ideal');
+  r = await no('PUT', '/api/me/ideal', { ideal: { presetId: 'bhagat_singh' } });
+  ok(r.status === 200 && r.data.user.ideal.name === 'Bhagat Singh' && r.data.user.ideal.color === '#EF4444' && r.data.user.followers === 0, 'existing user sets an ideal (Bhagat Singh, red) via PUT /api/me/ideal');
+  r = await no('GET', '/api/users/' + uNo); ok(r.data.user.ideal.preset_id === 'bhagat_singh', 'profile shows the new ideal');
+  r = await no('PUT', '/api/me/ideal', { ideal: { custom: { name: 'Coach Ravi', qualities: ['discipline', 'leadership', 'courage'] } } });
+  ok(r.status === 200 && r.data.user.ideal.custom && r.data.user.ideal.name === 'Coach Ravi' && r.data.user.ideal.color === '#F59E0B' && r.data.user.ideal.qualities.length === 3, 'change to a custom ideal with 3 qualities (discipline amber)');
+  r = await no('PUT', '/api/me/ideal', { ideal: { custom: { name: 'Coach', qualities: ['fame'] } } }); ok(r.status === 400, 'edit with an invalid quality -> 400');
+  r = await no('PUT', '/api/me/ideal', { ideal: { custom: { name: 'z'.repeat(41), qualities: ['wisdom'] } } }); ok(r.status === 400, 'edit with a 41-char name -> 400');
+  r = await no('PUT', '/api/me/ideal', { ideal: { custom: { name: '<script>x</script>', qualities: ['wisdom'] } } }); ok(r.status === 400, 'edit with HTML in the name -> 400');
+  r = await no('PUT', '/api/me/ideal', {}); ok(r.status === 400, 'edit without an ideal field -> 400');
+  r = await no('GET', '/api/me'); ok(r.data.user.ideal.name === 'Coach Ravi', 'rejected edits leave the ideal unchanged');
+  const ef = new FormData(); ef.append('bio', 'bio edit keeps ideal');
+  r = await no('PUT', '/api/me', ef, true); ok(r.data.user.bio === 'bio edit keeps ideal' && r.data.user.ideal && r.data.user.ideal.name === 'Coach Ravi', 'Edit profile (PUT /api/me) keeps the ideal');
+  r = await no('PUT', '/api/me/ideal', { ideal: null }); ok(r.status === 200 && r.data.user.ideal === null, 'ideal: null clears it');
+  r = await c()('PUT', '/api/me/ideal', { ideal: { presetId: 'kalam' } }); ok(r.status === 401, 'PUT /api/me/ideal needs login (401)');
+
+  // posts carry the author's ideal (for the coloured dot)
+  const fd = new FormData(); fd.append('text', 'post with an ideal dot ' + rnd);
+  r = await pre('POST', '/api/posts', fd, true);
+  const pid = r.data.post.id;
+  ok(r.data.post.ideal && r.data.post.ideal.name === 'APJ Abdul Kalam' && r.data.post.ideal.primary === 'innovation' && r.data.post.ideal_name === undefined, 'new post has author ideal {name, primary, color} (raw columns not leaked)');
+  r = await pre('GET', '/api/feed/explore'); const fp = r.data.items.find(p => p.id === pid);
+  ok(fp && fp.ideal && fp.ideal.color === '#06B6D4', 'feed items carry the author ideal');
+  r = await pre('GET', '/api/users/' + uNo + '/posts'); ok(r.status === 200, 'profile posts still load');
+  r = await pre('GET', `/api/posts/${pid}`); ok(r.data.post.ideal.name === 'APJ Abdul Kalam', 'thread post carries the author ideal');
+  await pre('DELETE', `/api/posts/${pid}`);
+  r = await pre('GET', '/api/users/' + uPre); ok(r.data.user.password_hash === undefined && r.data.user.ideal_qualities === undefined, 'no raw DB columns in publicUser');
 }

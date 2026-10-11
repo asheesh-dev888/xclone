@@ -9,6 +9,7 @@ const db = require('./db');
 const google = require('./google-auth');
 const ai = require('./ai');
 const admin = require('./admin');
+const ideals = require('./ideals');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -63,7 +64,7 @@ async function startSession(res, userId) {
   res.cookie('sid', token, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 864e5 });
   return token;
 }
-const publicUser = (u) => u && ({ id: u.id, username: u.username, name: u.name, bio: u.bio, location: u.location, avatar: u.avatar, banner: u.banner, created_at: u.created_at });
+const publicUser = (u) => u && ({ id: u.id, username: u.username, name: u.name, bio: u.bio, location: u.location, avatar: u.avatar, banner: u.banner, created_at: u.created_at, ideal: ideals.idealOut(u) });
 const findUser = (name) => db.get('SELECT * FROM users WHERE lower(username)=lower($1)', [String(name)]);
 
 const USERNAME_RE = /^[A-Za-z0-9_.]{3,20}$/;
@@ -73,11 +74,15 @@ app.post('/api/signup', h(async (req, res) => {
   const username = cleanUsername((req.body || {}).username);
   if (!USERNAME_RE.test(username)) return res.status(400).json({ error: 'Username must be 3–20 characters: letters, numbers, _ or . (no spaces or emoji)' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  let ideal;
+  try { ideal = ideals.parseIdeal((req.body || {}).ideal); } catch (e) { return res.status(400).json({ error: e.message }); }
   if (await findUser(username)) return res.status(409).json({ error: 'Username already taken' });
   let u;
   try {
-    u = await db.get('INSERT INTO users(username,name,password_hash,created_at) VALUES ($1,$2,$3,$4) RETURNING *',
-      [username, (name || String((req.body || {}).username || '').trim().replace(/^@/, '') || username).slice(0, 50), bcrypt.hashSync(password, 10), now()]);
+    u = await db.get(`INSERT INTO users(username,name,password_hash,created_at,ideal_name,ideal_preset_id,ideal_qualities)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [username, (name || String((req.body || {}).username || '').trim().replace(/^@/, '') || username).slice(0, 50), bcrypt.hashSync(password, 10), now(),
+        ideal ? ideal.name : null, ideal ? ideal.preset_id : null, ideal ? ideal.qualities : null]);
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Username already taken' });
     throw e;
@@ -135,9 +140,11 @@ async function userForGoogle(g) {
   for (let attempt = 0; ; attempt++) {
     const username = await google.uniqueUsername(base, async (n) => !!(await findUser(n)));
     try {
-      return await db.get(`INSERT INTO users(username,name,password_hash,email,google_id,avatar,created_at)
+      const created = await db.get(`INSERT INTO users(username,name,password_hash,email,google_id,avatar,created_at)
         VALUES ($1,$2,NULL,$3,$4,$5,$6) RETURNING *`,
         [username, (String(g.name || '').trim() || username).slice(0, 50), g.email, g.sub, avatar, now()]);
+      created.isNew = true;
+      return created;
     } catch (e) {
       if (e.code !== '23505' || attempt >= 3) throw e;
       const again = await db.get('SELECT * FROM users WHERE google_id=$1', [g.sub]); // concurrent callback won
@@ -161,7 +168,8 @@ app.get('/auth/google/callback', h(async (req, res) => {
   const u = await userForGoogle(profile);
   if (req.cookies.sid) await db.run('DELETE FROM sessions WHERE token=$1', [req.cookies.sid]);
   await startSession(res, u.id);
-  res.redirect('/home');
+  // Brand-new Google accounts get the "Choose your ideal" picker once (the SPA opens it for ?ideal=1).
+  res.redirect(u.isNew && !u.ideal_name ? '/home?ideal=1' : '/home');
 }));
 
 // ---------- uploads (stored in Postgres, served from /media/:id) ----------
@@ -200,7 +208,7 @@ app.get('/media/:id', h(async (req, res) => {
 // Base select for a post with author + counts + viewer state.
 const POST_SELECT = `
 SELECT p.id, p.text, p.image, p.parent_id, p.created_at, p.user_id,
-  u.username, u.name, u.avatar,
+  u.username, u.name, u.avatar, u.ideal_name, u.ideal_preset_id, u.ideal_qualities,
   (SELECT COUNT(*)::int FROM likes l WHERE l.post_id=p.id) like_count,
   (SELECT COUNT(*)::int FROM posts r WHERE r.parent_id=p.id) reply_count,
   (SELECT COUNT(*)::int FROM posts r WHERE r.repost_of=p.id) repost_count,
@@ -208,10 +216,19 @@ SELECT p.id, p.text, p.image, p.parent_id, p.created_at, p.user_id,
   EXISTS(SELECT 1 FROM posts r WHERE r.repost_of=p.id AND r.user_id=@me) reposted,
   (SELECT pu.username FROM posts pp JOIN users pu ON pu.id=pp.user_id WHERE pp.id=p.parent_id) reply_to
 FROM posts p JOIN users u ON u.id=p.user_id`;
-const getPost = (id, me) => db.get(POST_SELECT + ' WHERE p.id=@id', { id, me: me || 0 });
+// Author's ideal (for the small coloured dot next to names) replaces the raw ideal_* columns.
+function postOut(r) {
+  if (!r) return r;
+  const { ideal_name, ideal_preset_id, ideal_qualities, ...p } = r;
+  const i = ideals.idealOut({ ideal_name, ideal_preset_id, ideal_qualities });
+  p.ideal = i ? { name: i.name, primary: i.primary, color: i.color } : null;
+  return p;
+}
+const getPost = async (id, me) => postOut(await db.get(POST_SELECT + ' WHERE p.id=@id', { id, me: me || 0 }));
+const allPosts = async (sql, params) => (await db.all(sql, params)).map(postOut);
 async function getPosts(ids, me) {
   if (!ids.length) return new Map();
-  const rows = await db.all(POST_SELECT + ' WHERE p.id = ANY(@ids::int[])', { ids, me: me || 0 });
+  const rows = await allPosts(POST_SELECT + ' WHERE p.id = ANY(@ids::int[])', { ids, me: me || 0 });
   return new Map(rows.map(r => [r.id, r]));
 }
 
@@ -284,7 +301,7 @@ app.get('/api/posts/:id', h(async (req, res) => {
     SELECT id FROM anc WHERE d > 0 ORDER BY d DESC`, [post.id]);
   const map = await getPosts(anc.map(a => a.id), me);
   const ancestors = anc.map(a => map.get(a.id)).filter(Boolean);
-  const replies = await db.all(POST_SELECT + ' WHERE p.parent_id=@id ORDER BY p.created_at ASC', { id: post.id, me });
+  const replies = await allPosts(POST_SELECT + ' WHERE p.parent_id=@id ORDER BY p.created_at ASC', { id: post.id, me });
   res.json({ post, ancestors, replies });
 }));
 
@@ -359,11 +376,11 @@ app.get('/api/users/:username/posts', h(async (req, res) => {
   const keyed = (rows) => rows.map(p => ({ ...p, key: 'p' + p.id }));
   let items;
   if (tab === 'replies') {
-    items = keyed(await db.all(POST_SELECT + ' WHERE p.user_id=@uid AND p.parent_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 100', { uid: u.id, me }));
+    items = keyed(await allPosts(POST_SELECT + ' WHERE p.user_id=@uid AND p.parent_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 100', { uid: u.id, me }));
   } else if (tab === 'likes') {
-    items = keyed(await db.all(POST_SELECT + ' JOIN likes lk ON lk.post_id=p.id AND lk.user_id=@uid ORDER BY lk.created_at DESC LIMIT 100', { uid: u.id, me }));
+    items = keyed(await allPosts(POST_SELECT + ' JOIN likes lk ON lk.post_id=p.id AND lk.user_id=@uid ORDER BY lk.created_at DESC LIMIT 100', { uid: u.id, me }));
   } else if (tab === 'media') {
-    items = keyed(await db.all(POST_SELECT + ' WHERE p.user_id=@uid AND p.image IS NOT NULL ORDER BY p.created_at DESC LIMIT 100', { uid: u.id, me }));
+    items = keyed(await allPosts(POST_SELECT + ' WHERE p.user_id=@uid AND p.image IS NOT NULL ORDER BY p.created_at DESC LIMIT 100', { uid: u.id, me }));
   } else {
     items = await hydrate(await db.all(`${TL} WHERE p.user_id=$1 AND p.parent_id IS NULL ORDER BY p.created_at DESC LIMIT 100`, [u.id]), me);
   }
@@ -409,6 +426,20 @@ app.put('/api/me', auth, upload.fields([{ name: 'avatar', maxCount: 1 }, { name:
   res.json({ user: await profileById(me.id, me.id) });
 }));
 
+// "Choose your ideal": presets + palette, and set/change/clear your own ideal ({ideal: null} clears it).
+app.get('/api/ideals', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json({ qualities: ideals.QUALITIES, presets: ideals.PRESETS, custom_name_max: ideals.CUSTOM_NAME_MAX, custom_qualities_max: ideals.CUSTOM_QUALITIES_MAX });
+});
+app.put('/api/me/ideal', auth, h(async (req, res) => {
+  if (!req.body || !('ideal' in req.body)) return res.status(400).json({ error: 'Missing ideal' });
+  let ideal;
+  try { ideal = ideals.parseIdeal(req.body.ideal); } catch (e) { return res.status(400).json({ error: e.message }); }
+  await db.run('UPDATE users SET ideal_name=$1, ideal_preset_id=$2, ideal_qualities=$3 WHERE id=$4',
+    [ideal ? ideal.name : null, ideal ? ideal.preset_id : null, ideal ? ideal.qualities : null, req.user.id]);
+  res.json({ user: await profileById(req.user.id, req.user.id) });
+}));
+
 app.get('/api/suggestions', h(async (req, res) => {
   const me = req.user ? req.user.id : 0;
   const rows = await db.all(`SELECT * FROM (${PROFILE_SELECT}
@@ -430,7 +461,7 @@ app.get('/api/search', h(async (req, res) => {
   const escLike = (s) => '%' + s.replace(/[%_\\]/g, m => '\\' + m) + '%';
   const like = escLike(q.replace(/^@/, ''));
   const users = (await db.all(`${PROFILE_SELECT} WHERE u.username ILIKE @q OR u.name ILIKE @q ORDER BY u.id LIMIT 20`, { q: like, me })).map(toProfile);
-  const posts = (await db.all(POST_SELECT + ` WHERE p.repost_of IS NULL AND p.text ILIKE @q ORDER BY p.created_at DESC LIMIT 50`, { q: escLike(q), me })).map(p => ({ ...p, key: 'p' + p.id }));
+  const posts = (await allPosts(POST_SELECT + ` WHERE p.repost_of IS NULL AND p.text ILIKE @q ORDER BY p.created_at DESC LIMIT 50`, { q: escLike(q), me })).map(p => ({ ...p, key: 'p' + p.id }));
   res.json({ users, posts });
 }));
 

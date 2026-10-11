@@ -1,9 +1,9 @@
 // ZuZu service worker: network-first for the app shell/static files, with an offline fallback.
 // Never caches API (including direct messages under /api/dm, ZuZu AI answers under /api/ai and admin stats under /api/admin), the /admin page, auth, media uploads, app downloads (/download) or non-GET requests.
-const CACHE = 'zuzu-v5';
+const CACHE = 'zuzu-v6';
 // Paths that always go straight to the network and are never cached.
 const BYPASS = /^\/(api|admin|auth|media|download|healthz|\.well-known)(\/|$)/;
-const SHELL = ['/', '/style.css', '/app.js', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
+const SHELL = ['/', '/style.css', '/app.js', '/ideals.js', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));

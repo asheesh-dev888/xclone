@@ -6,6 +6,7 @@
 // All "today"/day boundaries are Asia/Kolkata (IST, UTC+05:30, no DST).
 const crypto = require('crypto');
 const path = require('path');
+const ideals = require('./ideals');
 
 const IST_OFFSET_MS = 330 * 60e3;
 const DAY_MS = 864e5;
@@ -48,7 +49,7 @@ const userOut = (r) => ({ id: r.id, username: r.username, name: r.name, created_
 async function stats(db, { nowMs = Date.now(), since = null } = {}) {
   const w = windows(nowMs);
   const p = { t0: w.todayStart, y0: w.yesterdayStart, d7: w.last7Start, d30: w.last30Start, off: IST_OFFSET_MS, day: DAY_MS };
-  const [u, daily, latest, posts, dms, active] = await Promise.all([
+  const [u, daily, latest, posts, dms, active, idealRows] = await Promise.all([
     db.get(`SELECT COUNT(*)::int total,
         COUNT(*) FILTER (WHERE NOT is_demo)::int real,
         COUNT(*) FILTER (WHERE is_demo)::int demo,
@@ -71,6 +72,10 @@ async function stats(db, { nowMs = Date.now(), since = null } = {}) {
         SELECT user_id FROM posts WHERE created_at >= @t0
         UNION SELECT user_id FROM likes WHERE created_at >= @t0
         UNION SELECT sender_id FROM dm_messages WHERE created_at >= @t0) a`, p),
+    // Ideals chosen by real users: presets grouped by id, "make your own" grouped by name (case-insensitive).
+    db.all(`SELECT ideal_preset_id preset_id, CASE WHEN ideal_preset_id IS NULL THEN lower(ideal_name) END k,
+        MIN(ideal_name) ideal_name, MIN(ideal_qualities[1]) q1, COUNT(*)::int n
+      FROM users WHERE NOT is_demo AND ideal_name IS NOT NULL GROUP BY 1, 2`),
   ]);
   const byDay = new Map(daily.map(r => [r.d, r.n]));
   const series = [];
@@ -86,6 +91,7 @@ async function stats(db, { nowMs = Date.now(), since = null } = {}) {
     posts: { total: posts.total, today: posts.today, replies_today: posts.replies_today },
     dms: { total: dms.total, today: dms.today },
     active_users_today: active.n,
+    ideals: idealBreakdown(idealRows, u.real),
   };
   if (since !== null) {
     const c = await db.get('SELECT COUNT(*)::int n FROM users WHERE NOT is_demo AND created_at > $1', [since]);
@@ -94,6 +100,27 @@ async function stats(db, { nowMs = Date.now(), since = null } = {}) {
     out.since = { since, count: c.n, users: rows.map(userOut), truncated: c.n > rows.length };
   }
   return out;
+}
+
+// Count per ideal (top IDEALS_TOP) and per primary quality (all qualities, zeros included).
+const IDEALS_TOP = 50;
+function idealBreakdown(rows, realUsers) {
+  const byQ = new Map(ideals.QUALITIES.map(q => [q.key, 0]));
+  const list = rows.map(r => {
+    const i = ideals.idealOut({ ideal_name: r.ideal_name, ideal_preset_id: r.preset_id, ideal_qualities: r.q1 ? [r.q1] : [] });
+    if (!i) return null;
+    if (i.primary) byQ.set(i.primary, byQ.get(i.primary) + r.n);
+    return { name: i.name, preset_id: i.preset_id, custom: i.custom, primary: i.primary, color: i.color, count: r.n };
+  }).filter(Boolean).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const chosen = list.reduce((a, x) => a + x.count, 0);
+  return {
+    users_with_ideal: chosen,
+    users_without_ideal: Math.max(0, realUsers - chosen),
+    custom: list.filter(x => x.custom).reduce((a, x) => a + x.count, 0),
+    by_ideal: list.slice(0, IDEALS_TOP),
+    by_quality: ideals.QUALITIES.map(q => ({ quality: q.key, label: q.label, color: q.color, count: byQ.get(q.key) }))
+      .sort((a, b) => b.count - a.count),
+  };
 }
 
 function register(app, { h, db, root }) {

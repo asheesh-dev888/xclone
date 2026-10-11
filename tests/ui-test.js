@@ -177,6 +177,8 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await aiUi(browser, errors, step, await ctx.storageState());
   console.log('\n  Admin dashboard');
   await adminUi(browser, errors, step, await ctx.storageState());
+  console.log('\n  Choose your ideal');
+  await idealUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
   await browser.close();
   process.exit(errors.length ? 1 : 0);
@@ -318,7 +320,14 @@ async function googleUi(browser, errors, step) {
     await page.route('https://lh3.googleusercontent.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: makePng(96, 96, [66, 133, 244]) }));
     await page.goto(GB + '/login');
     await page.click('a.btn-google');
-    try { await page.waitForURL('**/home', { timeout: 10000 }); } catch (e) { throw new Error('Google flow did not reach /home; at ' + page.url() + '\n' + app.log()); }
+    try { await page.waitForURL(/\/home(\?ideal=1)?$/, { timeout: 10000 }); } catch (e) { throw new Error('Google flow did not reach /home; at ' + page.url() + '\n' + app.log()); }
+    // First Google sign-in: the "Choose your ideal" picker opens once.
+    await page.waitForSelector('.ideal-modal #ideal-modal-picker .ideal-card');
+    if (new URL(page.url()).search) throw new Error('?ideal=1 not cleaned from the URL');
+    await page.click('.ideal-modal [data-ideal-card=tagore]');
+    await page.click('.ideal-modal [data-action=save-ideal]');
+    await page.waitForSelector('#modal-root:empty', { state: 'attached' });
+    step('first Google sign-in opens the "Choose your ideal" picker; picked Tagore');
     const sel = `.nav .me-chip img.avatar[src^="https://lh3.googleusercontent.com/"]`;
     await page.waitForSelector(sel);
     if (await page.getAttribute(sel, 'referrerpolicy') !== 'no-referrer') throw new Error('external avatar lacks referrerpolicy=no-referrer');
@@ -328,6 +337,12 @@ async function googleUi(browser, errors, step) {
     await page.goto(GB + '/u/ui.google' + rnd);
     try { await imgLoaded(page, '.pf img.avatar[src^="https://"]'); } catch (e) { throw new Error('profile avatar: ' + page.url() + ' ' + await page.evaluate(() => (document.querySelector('#profile') || document.body).innerHTML.slice(0, 600))); }
     step('external avatar renders on profile');
+    await page.waitForSelector('.pf .ideal-badge:has-text("Rabindranath Tagore")');
+    if (await page.evaluate(() => getComputedStyle(document.querySelector('.pf .ideal-badge .dot')).backgroundColor) !== 'rgb(168, 85, 247)') throw new Error('Tagore badge is not purple');
+    step('Google user profile shows the ideal chosen at first sign-in (purple)');
+    await page.goto(GB + '/home'); await page.waitForSelector('#feed');
+    if (await page.$('.ideal-modal, #ideal-prompt')) throw new Error('picker / prompt shown again after choosing an ideal');
+    step('picker is not shown again on later visits');
   } finally {
     await ctx.close(); app.child.kill(); mock.srv.close();
   }
@@ -722,6 +737,10 @@ async function adminUi(browser, errors, step, loggedIn) {
     if (maxBar.n > 0 && maxBar.h < 50) throw new Error('tallest bar not drawn: ' + JSON.stringify(maxBar));
     if (bars.some(b => b.n === 0 && b.h > 0)) throw new Error('zero days drawn with height');
     step('chart: 30 daily bars (CSS, no libraries) matching the API');
+    const iq = await page.$$eval('#ideal-breakdown .iq-row', l => l.map(e => ({ q: e.dataset.quality, n: +e.dataset.count, c: getComputedStyle(e.querySelector('.dot')).backgroundColor })));
+    if (iq.length !== 10 || iq.some((r, i) => r.q !== api.ideals.by_quality[i].quality || r.n !== api.ideals.by_quality[i].count)) throw new Error('ideal breakdown does not match the API: ' + JSON.stringify(iq));
+    if (new Set(iq.map(r => r.c)).size !== 10) throw new Error('ideal breakdown colours are not distinct');
+    step(`"Ideals chosen" breakdown: 10 coloured quality rows + ${await page.$$eval('#ideal-breakdown .ii-row', l => l.length)} top ideals, matching the API`);
     const rows = await page.$$eval('.admin-table tbody tr', l => l.length);
     if (rows !== Math.min(20, api.latest_signups.length)) throw new Error('table rows ' + rows);
     const href = await page.getAttribute('.admin-table tbody tr a.adm-user', 'href');
@@ -751,4 +770,169 @@ async function adminUi(browser, errors, step, loggedIn) {
     step('mobile: Admin icon in the top bar; 2-column cards, no horizontal overflow');
     await ctx.close();
   } finally { app.child.kill(); }
+}
+
+// ---------- Choose your ideal ----------
+const hexRgb = (h) => { const [r, g, b] = h.match(/\w\w/g).map(x => parseInt(x, 16)); return `rgb(${r}, ${g}, ${b})`; };
+async function idealUi(browser, errors, step) {
+  const { QUALITIES, PRESETS } = require('../public/ideals.js');
+  const Q = Object.fromEntries(QUALITIES.map(q => [q.key, q]));
+  const watch = (p) => { p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
+  const rnd = Math.floor(Math.random() * 1e5);
+  const newPage = async (opts = {}) => { const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, ...opts }); const p = await ctx.newPage(); watch(p); return { ctx, p }; };
+  const fillAccount = async (p, u) => { await p.fill('input[name=name]', 'Ideal ' + u); await p.fill('input[name=username]', u); await p.fill('input[name=password]', 'secret123'); };
+  const checked = (p) => p.$$eval('#signup-ideal [data-ideal-card][aria-checked=true]', l => l.map(e => e.dataset.idealCard));
+  const badgeColor = (p) => p.evaluate(() => getComputedStyle(document.querySelector('.pf .ideal-badge .dot')).backgroundColor);
+
+  // ---- desktop: picker renders the palette, single selection, custom card ----
+  let { ctx, p } = await newPage();
+  await p.goto(BASE + '/signup'); await p.waitForSelector('#signup-ideal .ideal-card');
+  const order = await p.evaluate(() => { const pw = document.querySelector('input[name=password]'), pk = document.querySelector('#signup-ideal'), b = document.querySelector('form[data-mode=signup] button[type=submit]'); return !!(pw.compareDocumentPosition(pk) & 4) && !!(pk.compareDocumentPosition(b) & 4); });
+  if (!order) throw new Error('"Choose your ideal" is not between the password field and the submit button');
+  const cards = await p.$$eval('#signup-ideal .ideal-card', l => l.map(e => ({ id: e.dataset.idealCard, border: getComputedStyle(e).borderLeftColor, name: e.querySelector('.ic-name').textContent, chips: [...e.querySelectorAll('.q-chip')].map(c => ({ q: c.dataset.q, color: getComputedStyle(c).color })) })));
+  if (cards.length !== PRESETS.length + 1 || cards[cards.length - 1].id !== 'custom') throw new Error('expected ' + PRESETS.length + ' presets + "Make your own", got ' + cards.map(c => c.id));
+  for (const pr of PRESETS) {
+    const c = cards.find(x => x.id === pr.id);
+    if (!c || c.name !== pr.name) throw new Error('missing preset card ' + pr.id);
+    if (c.border !== hexRgb(Q[pr.primary].color)) throw new Error(`${pr.name}: border ${c.border} != ${pr.primary} ${Q[pr.primary].color}`);
+    const want = [pr.primary, ...pr.secondary];
+    if (c.chips.map(x => x.q).join() !== want.join() || c.chips.some(x => x.color !== hexRgb(Q[x.q].color))) throw new Error(pr.name + ': quality chips wrong ' + JSON.stringify(c.chips));
+  }
+  if (new Set(cards.slice(0, -1).map(c => c.border)).size < 9) throw new Error('preset cards are not using distinct quality colours');
+  step(`sign-up shows ${PRESETS.length} preset ideal cards + "Make your own"; each coloured by its primary quality, with quality chips`);
+  if ((await checked(p)).join() !== 'skip') throw new Error('"Skip for now" should be the default: ' + await checked(p));
+  step('"Skip for now" is selected by default (optional)');
+  const u1 = 'idui' + rnd;
+  await fillAccount(p, u1);
+  await p.click('[data-ideal-card=gandhi]');
+  await p.click('[data-ideal-card=kalam]');
+  if ((await checked(p)).join() !== 'kalam') throw new Error('single selection broken: ' + await checked(p));
+  await p.waitForTimeout(300); // let the ring transition finish
+  const sel = await p.$eval('[data-ideal-card=kalam]', e => ({ shadow: getComputedStyle(e).boxShadow, check: getComputedStyle(e.querySelector('.ic-check')).display, checkBg: getComputedStyle(e.querySelector('.ic-check')).backgroundColor }));
+  if (!sel.shadow.includes('rgb(6, 182, 212)') || sel.check === 'none' || sel.checkBg !== 'rgb(6, 182, 212)') throw new Error('selected card lacks the coloured ring / check: ' + JSON.stringify(sel));
+  step('selecting Kalam: one card at a time, cyan ring + check mark');
+  await p.evaluate(() => document.querySelector('#signup-ideal').scrollIntoView({ block: 'center' }));
+  await p.waitForTimeout(250);
+  await p.screenshot({ path: OUT + '/15-ideal-signup.png' });
+  step('screenshot 15-ideal-signup.png');
+
+  // custom card
+  await p.click('[data-ideal-card=custom]');
+  await p.waitForSelector('#signup-ideal .ideal-custom:not([hidden])');
+  await p.click('form[data-mode=signup] button[type=submit]');
+  await p.waitForSelector('#signup-ideal .ideal-err:has-text("name")');
+  await p.fill('.ideal-name', '<img src=x onerror="window.__idealXss=1">');
+  await p.click('[data-ideal-q=courage]');
+  await p.click('form[data-mode=signup] button[type=submit]');
+  await p.waitForSelector('#signup-ideal .ideal-err:has-text("can’t contain")');
+  if (!p.url().endsWith('/signup')) throw new Error('invalid custom ideal submitted');
+  step('custom: empty name and HTML in the name are blocked with a message');
+  await p.fill('.ideal-name', 'x'.repeat(60));
+  if ((await p.inputValue('.ideal-name')).length !== 40) throw new Error('custom name not capped at 40');
+  if ((await p.textContent('#signup-ideal .ideal-custom .cnt')) !== '40/40') throw new Error('counter not 40/40');
+  await p.fill('.ideal-name', '  My   Grandmother ');
+  await p.click('[data-ideal-q=courage]'); // un-pick
+  for (const k of ['compassion', 'wisdom', 'discipline']) await p.click(`[data-ideal-q=${k}]`);
+  await p.click('[data-ideal-q=creativity]');
+  await p.waitForSelector('#signup-ideal .ideal-err:has-text("up to 3")');
+  const pressed = await p.$$eval('.q-opt[aria-pressed=true]', l => l.map(e => e.dataset.idealQ + ':' + e.querySelector('.ord').textContent));
+  if (pressed.sort().join() !== 'compassion:1,discipline:3,wisdom:2') throw new Error('quality picks wrong: ' + pressed);
+  await p.waitForTimeout(300);
+  const cc = await p.$eval('[data-ideal-card=custom]', e => ({ border: getComputedStyle(e).borderLeftColor, name: e.querySelector('.ic-name').textContent, chips: [...e.querySelectorAll('.q-chip')].map(c => c.dataset.q).join() }));
+  if (cc.border !== 'rgb(236, 72, 153)' || cc.name !== 'My Grandmother' || cc.chips !== 'compassion,wisdom,discipline') throw new Error('custom card preview wrong: ' + JSON.stringify(cc));
+  step('custom: name + up to 3 qualities; the first (Compassion) colours the card pink; 4th pick refused');
+  await p.click('form[data-mode=signup] button[type=submit]');
+  await p.waitForURL('**/home');
+  if (await p.$('#ideal-prompt')) throw new Error('ideal prompt shown to a user who has an ideal');
+  await p.goto(BASE + '/u/' + u1); await p.waitForSelector('.pf .ideal-badge');
+  if ((await p.textContent('.pf .ideal-badge .lbl')) !== 'Ideal: My Grandmother') throw new Error('badge text: ' + await p.textContent('.pf .ideal-badge .lbl'));
+  if (await badgeColor(p) !== 'rgb(236, 72, 153)') throw new Error('custom badge not pink: ' + await badgeColor(p));
+  if ((await p.$$('.pf .ideal-badge .q-chip')).length !== 3) throw new Error('badge chips missing');
+  if (await p.evaluate(() => window.__idealXss)) throw new Error('XSS via ideal name');
+  step('signed up with custom ideal; profile badge "Ideal: My Grandmother" in pink with 3 chips');
+
+  // edit profile: same picker, change to Bhagat Singh
+  await p.click('text=Edit profile');
+  await p.waitForSelector('#edit-ideal [data-ideal-card=custom][aria-checked=true]');
+  if ((await p.inputValue('#edit-ideal .ideal-name')) !== 'My Grandmother') throw new Error('edit picker not pre-filled');
+  await p.click('#edit-ideal [data-ideal-card=bhagat_singh]');
+  await p.click('[data-action=save-profile]');
+  await p.waitForSelector('.pf .ideal-badge:has-text("Bhagat Singh")');
+  if (await badgeColor(p) !== 'rgb(239, 68, 68)') throw new Error('Bhagat Singh badge not red');
+  step('Edit profile reuses the picker (pre-filled); changed to Bhagat Singh -> red badge');
+  await p.goto(BASE + '/home');
+  await p.fill('#home-composer textarea', 'Inspired today #ideal');
+  await p.click('#home-composer button[type=submit]');
+  await p.waitForSelector('#feed .post:has-text("Inspired today") .ideal-dot');
+  const dot = await p.$eval('#feed .post:has-text("Inspired today") .ideal-dot', e => ({ t: e.title, c: getComputedStyle(e).backgroundColor, w: e.getBoundingClientRect().width }));
+  if (dot.t !== 'Ideal: Bhagat Singh' || dot.c !== 'rgb(239, 68, 68)' || dot.w > 10) throw new Error('post ideal dot wrong: ' + JSON.stringify(dot));
+  step('posts show a tiny coloured dot next to the name (tooltip "Ideal: Bhagat Singh")');
+  await ctx.close();
+
+  // ---- preset sign-up + profile badge screenshot ----
+  ({ ctx, p } = await newPage());
+  const u2 = 'idkalam' + rnd;
+  await p.goto(BASE + '/signup'); await p.waitForSelector('#signup-ideal .ideal-card');
+  await fillAccount(p, u2); await p.click('[data-ideal-card=kalam]');
+  await p.click('form[data-mode=signup] button[type=submit]'); await p.waitForURL('**/home');
+  await p.fill('#home-composer textarea', 'Dream, dream, dream. Dreams transform into thoughts and thoughts result in action. #inspiration');
+  await p.click('#home-composer button[type=submit]'); await p.waitForSelector('#feed .post .ideal-dot');
+  await p.goto(BASE + '/u/' + u2); await p.waitForSelector('.pf .ideal-badge'); await p.waitForSelector('#feed .post');
+  if (await badgeColor(p) !== 'rgb(6, 182, 212)' || !(await p.textContent('.pf .ideal-badge')).includes('Ideal: APJ Abdul Kalam')) throw new Error('Kalam badge wrong');
+  await p.waitForTimeout(300);
+  await p.screenshot({ path: OUT + '/17-ideal-profile.png' });
+  step('signed up with preset Kalam; cyan "Ideal: APJ Abdul Kalam" badge (screenshot 17-ideal-profile.png)');
+  await ctx.close();
+
+  // ---- skipped: one-time dismissible prompt + choose later from the profile ----
+  ({ ctx, p } = await newPage());
+  const u3 = 'idskip' + rnd;
+  await p.goto(BASE + '/signup'); await p.waitForSelector('#signup-ideal .ideal-card');
+  await fillAccount(p, u3);
+  await p.click('[data-ideal-card=tagore]'); await p.click('[data-ideal-card=skip]');
+  await p.click('form[data-mode=signup] button[type=submit]'); await p.waitForURL('**/home');
+  await p.waitForSelector('#ideal-prompt:has-text("Choose your ideal")');
+  await p.click('#ideal-prompt [data-action=open-ideal]');
+  await p.waitForSelector('.ideal-modal #ideal-modal-picker');
+  await p.click('.ideal-modal [data-action=close-modal]');
+  await p.click('#ideal-prompt [data-action=dismiss-ideal-prompt]');
+  await p.waitForSelector('#ideal-prompt', { state: 'detached' });
+  await p.reload(); await p.waitForSelector('#home-composer');
+  if (await p.$('#ideal-prompt')) throw new Error('dismissed prompt came back');
+  const ls = await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('zuzu.idealPromptDismissed')));
+  if (ls.length !== 1) throw new Error('dismissal not stored in localStorage');
+  step('skipped: home shows a "Choose your ideal" prompt; dismissing it sticks (localStorage)');
+  await p.goto(BASE + '/u/' + u3); await p.waitForSelector('.pf .ideal-add');
+  await p.click('.pf .ideal-add'); await p.waitForSelector('.ideal-modal [data-ideal-card=skip][aria-checked=true]');
+  await p.click('.ideal-modal [data-ideal-card=ambedkar]'); await p.click('.ideal-modal [data-action=save-ideal]');
+  await p.waitForSelector('.pf .ideal-badge:has-text("Dr B.R. Ambedkar")');
+  if (await badgeColor(p) !== 'rgb(34, 197, 94)') throw new Error('Ambedkar badge not green');
+  step('own profile without an ideal: "Choose your ideal" button -> picker -> green Ambedkar badge');
+  await ctx.close();
+
+  // ---- mobile ----
+  ({ ctx, p } = await newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }));
+  const u4 = 'idmob' + rnd;
+  await p.goto(BASE + '/signup'); await p.waitForSelector('#signup-ideal .ideal-card');
+  const m = await p.evaluate(() => { const g = document.querySelector('#signup-ideal .ideal-grid'), c = g.querySelector('.ideal-card'); return { disp: getComputedStyle(g).display, ox: getComputedStyle(g).overflowX, sw: g.scrollWidth, cw: g.clientWidth, h: g.getBoundingClientRect().height, cardW: c.getBoundingClientRect().width, doc: document.documentElement.scrollWidth }; });
+  if (m.disp !== 'flex' || m.ox !== 'auto' || m.sw <= m.cw || m.h > 160 || m.cardW > 260 || m.doc > 390) throw new Error('mobile picker is not a compact horizontal row: ' + JSON.stringify(m));
+  step(`mobile: picker is one horizontally scrollable row (${Math.round(m.h)}px tall), no page overflow`);
+  await fillAccount(p, u4);
+  await p.locator('[data-ideal-card=lakshmibai]').tap();
+  if ((await checked(p)).join() !== 'lakshmibai') throw new Error('mobile tap did not select');
+  await p.locator('[data-ideal-card=custom]').tap();
+  await p.waitForSelector('#signup-ideal .ideal-custom:not([hidden])');
+  await p.locator('[data-ideal-card=lakshmibai]').tap();
+  await p.waitForSelector('#signup-ideal .ideal-custom[hidden]', { state: 'attached' });
+  await p.evaluate(() => document.querySelector('#signup-ideal').scrollIntoView({ block: 'center' }));
+  await p.waitForTimeout(300);
+  if (await p.evaluate(() => document.documentElement.scrollWidth) > 390) throw new Error('mobile overflow after selecting');
+  await p.screenshot({ path: OUT + '/16-ideal-mobile.png' });
+  step('mobile: tapping selects (Rani Lakshmibai, red ring) and the custom card opens its editor (screenshot 16-ideal-mobile.png)');
+  await p.locator('form[data-mode=signup] button[type=submit]').tap(); await p.waitForURL('**/home');
+  await p.goto(BASE + '/u/' + u4); await p.waitForSelector('.pf .ideal-badge');
+  if (await badgeColor(p) !== 'rgb(239, 68, 68)') throw new Error('mobile Lakshmibai badge not red');
+  if (await p.evaluate(() => document.documentElement.scrollWidth) > 390) throw new Error('mobile profile overflows');
+  step('mobile: profile badge fits, red for Courage');
+  await ctx.close();
 }

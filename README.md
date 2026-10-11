@@ -128,6 +128,8 @@ previous 6/29 IST days. Response (all `Cache-Control: no-store`):
     dms              {total, today}                         DM messages
     active_users_today                                      posted/replied/reposted, liked or sent a DM today
     since            {since, count, users[], truncated}     only with ?since=<epoch ms>: real users created after it (list max 500)
+    ideals           {users_with_ideal, users_without_ideal, custom, by_ideal: [{name, preset_id, custom, primary, color, count}] (top 50),
+                      by_quality: [{quality, label, color, count}] (all 10, by primary quality)}   real users only
 
 `curl -H "Authorization: Bearer $ADMIN_TOKEN" https://zuzu-app.onrender.com/api/admin/stats?since=1760000000000`
 
@@ -135,6 +137,29 @@ AI requests aren't counted (ZuZu AI only keeps an in-memory rate-limit window, n
 Seeded demo accounts are flagged by the idempotent `users.is_demo` column: `schema.sql` adds it once and backfills the
 `seed.js` usernames (demo, akhil, priya_codes, rahul_cricket, spacenerd, foodie_arjun, newsbot, design_ananya;
 password accounts only), and `seed.js` sets it for new seeds. The service worker never caches `/api/admin` or `/admin`.
+
+## Choose your ideal
+Users can pick an "ideal" (a role model they look up to) when signing up, in Edit profile, or later from their profile
+or a one-time home-feed prompt. It's optional ("Skip for now" is the default).
+
+- **Data:** `public/ideals.js` is the single source for the quality palette and the preset ideals. The browser loads it
+  as `/ideals.js` (`window.ZUZU_IDEALS`), the server `require()`s it (`ideals.js` at the root validates and formats), and
+  `GET /api/ideals` serves it. Edit descriptions/colours/presets there; keep preset `id`s stable once people use them.
+- **Palette** (one colour per quality, all >= 4.5:1 on black): Wisdom `#3B82F6`, Courage `#EF4444`, Peace `#E5E7EB`,
+  Compassion `#EC4899`, Discipline `#F59E0B`, Creativity `#A855F7`, Leadership `#FACC15`, Devotion `#F97316`,
+  Justice `#22C55E`, Innovation `#06B6D4`. Each ideal's primary quality sets its colour; 1-2 secondary qualities show as chips.
+- **Make your own:** name (trimmed, spaces collapsed, max 40 chars, no `<`/`>` or control characters) + 1-3 quality keys;
+  the first is the primary. Validated on the server; names are always escaped when shown.
+- **Storage:** nullable `users.ideal_name`, `ideal_preset_id` (NULL for custom), `ideal_qualities TEXT[]` (idempotent
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`). Presets are displayed from the data file, so edits there apply everywhere.
+- **API:** `POST /api/signup` takes optional `ideal: {presetId}` or `{custom: {name, qualities}}` (bad ideal -> 400, no
+  account created); `PUT /api/me/ideal {ideal}` sets/changes it (`null` clears it). Users (`publicUser`) carry
+  `ideal: {name, preset_id, custom, description, qualities, primary, color}` or `null`; posts carry the author's
+  `ideal: {name, primary, color}` for the small coloured dot next to names.
+- **UI:** coloured card grid after the password field (2 columns, scrolls inside on desktop; one horizontally scrolling
+  row on mobile), selected card gets a ring + check. Profile badge "Ideal: <name>" in the primary colour with chips.
+  New Google accounts land on `/home?ideal=1`, which opens the picker once. Users without an ideal see a dismissible
+  "Choose your ideal" card at the top of the home feed (dismissal in `localStorage` `zuzu.idealPromptDismissed.<user id>`).
 
 ## Local commands
     cd /workspace/xclone
@@ -147,10 +172,11 @@ password accounts only), and `seed.js` sets it for new seeds. The service worker
                               #  ZuZu AI against a mock Groq server with app instances on :4192/:4193,
                               #  admin dashboard with instances on :4196 (admin on) / :4197 (admin off))
     node tests/ui-test.js     # headless Chrome end-to-end flow (ZuZu AI on :4194/:4195 with the mock;
-                              #  writes screenshots 12-ai-desktop.png / 13-ai-mobile.png; admin UI on :4198 -> 14-admin.png)
+                              #  writes screenshots 12-ai-desktop.png / 13-ai-mobile.png; admin UI on :4198 -> 14-admin.png;
+                              #  ideal picker -> 15-ideal-signup.png / 16-ideal-mobile.png / 17-ideal-profile.png)
     # Run tests with `env -u DATABASE_URL` so only the local DB from .env.local is used.
     node tests/shots.js       # regenerate screenshots/ (logs in as demo; opening DMs marks them read)
 
 ## Files
-server.js (API + static), ai.js (ZuZu AI), admin.js (admin dashboard API + /admin access), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
-public/{index.html,style.css,app.js,favicon.svg,sw.js,download/ZuZu.apk}, bin/cloudflared, screenshots/.
+server.js (API + static), ai.js (ZuZu AI), admin.js (admin dashboard API + /admin access), ideals.js (ideal validation/output), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
+public/{index.html,style.css,app.js,ideals.js,favicon.svg,sw.js,download/ZuZu.apk}, bin/cloudflared, screenshots/.

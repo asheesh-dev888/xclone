@@ -124,3 +124,10 @@ END $$;
 CREATE INDEX IF NOT EXISTS users_created ON users(created_at);
 CREATE INDEX IF NOT EXISTS likes_created ON likes(created_at);
 CREATE INDEX IF NOT EXISTS dm_messages_created ON dm_messages(created_at);
+
+-- "Choose your ideal" (a role model the user looks up to). All nullable; presets live in public/ideals.js.
+-- ideal_preset_id is set for presets (NULL for "make your own"); ideal_qualities holds 1-3 quality keys,
+-- the first being the primary quality that sets the colour.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ideal_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ideal_preset_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ideal_qualities TEXT[];

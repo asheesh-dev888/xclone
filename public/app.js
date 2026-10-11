@@ -36,6 +36,7 @@ const P = {
   send: 'M2.504 21.866l.526-2.108C3.04 19.719 4 15.823 4 12s-.96-7.719-.97-7.757l-.527-2.109L22.236 12 2.504 21.866zM5.981 13c-.072 1.962-.34 3.833-.583 5.183L17.764 12 5.398 5.818c.242 1.349.51 3.221.583 5.183H10v2H5.981z',
   logout: 'M16 13v-2H7V8l-5 4 5 4v-3h9zM20 3h-9c-1.103 0-2 .897-2 2v4h2V5h9v14h-9v-4H9v4c0 1.103.897 2 2 2h9c1.103 0 2-.897 2-2V5c0-1.103-.897-2-2-2z',
   chart: 'M8.75 21V3h2v18h-2zM18 21V8.5h2V21h-2zM4 21l.004-10h2L6 21H4zm9.248 0v-7h2v7h-2z',
+  check: 'M9 20c-.264 0-.52-.104-.707-.293l-4.785-4.785 1.414-1.414L9 17.586 19.072 7.5l1.414 1.414L9.707 19.707A1 1 0 0 1 9 20z',
   sparkle: 'M10 2.5l1.95 5.55L17.5 10l-5.55 1.95L10 17.5l-1.95-5.55L2.5 10l5.55-1.95L10 2.5zm0 4.6l-.85 2.05L7.1 10l2.05.85L10 12.9l.85-2.05L12.9 10l-2.05-.85L10 7.1zM18.5 14l.95 2.55L22 17.5l-2.55.95L18.5 21l-.95-2.55L15 17.5l2.55-.95L18.5 14z',
 };
 const ic = (name, cls = 'icon') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true"><path d="${P[name]}"/></svg>`;
@@ -241,7 +242,7 @@ function postHTML(p, { thread = false } = {}) {
   <article class="post ${thread ? 'thread-line ancestor' : ''}" data-post="${p.id}" data-href="/post/${p.id}">
     <div class="${thread ? 'avatar-col' : ''}"><a href="/u/${esc(p.username)}" data-link>${avatar(p)}</a></div>
     <div class="body">
-      <div class="meta"><a class="name" href="/u/${esc(p.username)}" data-link>${esc(p.name)}</a><span class="handle">@${esc(p.username)}</span><span>·</span><a href="/post/${p.id}" data-link title="${esc(fullDate(p.created_at))}">${ago(p.created_at)}</a>
+      <div class="meta"><a class="name" href="/u/${esc(p.username)}" data-link>${esc(p.name)}</a>${idealDot(p.ideal)}<span class="handle">@${esc(p.username)}</span><span>·</span><a href="/post/${p.id}" data-link title="${esc(fullDate(p.created_at))}">${ago(p.created_at)}</a>
         ${aiBtn(p)}<button class="more" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}" aria-label="More">${ic('dots', 'icon')}</button></div>
       ${p.reply_to ? `<div class="replying">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
       ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
@@ -369,7 +370,12 @@ document.addEventListener('submit', async (e) => {
     err.textContent = ''; btn.disabled = true;
     try {
       const body = { username: f.username.value.trim(), password: f.password.value };
-      if (mode === 'signup') body.name = f.name.value.trim();
+      if (mode === 'signup') {
+        body.name = f.name.value.trim();
+        const r = readIdeal($('#signup-ideal', f));
+        if (r.error) { idealError($('#signup-ideal', f), r.error); btn.disabled = false; return; }
+        if (r.ideal) body.ideal = r.ideal;
+      }
       const { user } = await api('POST', '/api/' + mode, body);
       state.me = user; state.unread = 0;
       await refreshMe();
@@ -379,12 +385,16 @@ document.addEventListener('submit', async (e) => {
   }
   if (f.dataset.form === 'edit-profile') {
     e.preventDefault();
-    const btn = $('[data-action="save-profile"]'); if (btn) btn.disabled = true;
+    const btn = $('[data-action="save-profile"]');
+    const picker = $('#edit-ideal', f), ir = readIdeal(picker);
+    if (ir.error) return idealError(picker, ir.error);
+    if (btn) btn.disabled = true;
     try {
       const fd = new FormData(f);
       if (!f.avatar.files[0]) fd.delete('avatar');
       if (!f.banner.files[0]) fd.delete('banner');
-      const { user } = await api('PUT', '/api/me', fd);
+      let { user } = await api('PUT', '/api/me', fd);
+      if (picker) ({ user } = await api('PUT', '/api/me/ideal', { ideal: ir.ideal }));
       state.me = { ...state.me, ...user };
       closeModal(); toast('Profile updated'); go('/u/' + user.username, true);
     } catch (ex) { toast(ex.message); if (btn) btn.disabled = false; }
@@ -451,6 +461,17 @@ document.addEventListener('click', async (e) => {
     else if (a === 'back') history.length > 1 ? history.back() : go('/home');
     else if (a === 'home-tab') { state.homeTab = el.dataset.tab; localStorage.setItem('homeTab', state.homeTab); viewHome(); }
     else if (a === 'go') go(el.dataset.href);
+    else if (a === 'open-ideal') openIdealModal();
+    else if (a === 'dismiss-ideal-prompt') { store('localStorage', idealPromptKey(), '1'); $('#ideal-prompt')?.remove(); }
+    else if (a === 'save-ideal') {
+      el.disabled = true;
+      const user = await saveIdealFrom($('#ideal-modal-picker'));
+      el.disabled = false;
+      if (!user) return;
+      closeModal(); $('#ideal-prompt')?.remove();
+      toast(user.ideal ? 'Your ideal: ' + user.ideal.name : 'Ideal removed');
+      if (location.pathname.toLowerCase() === '/u/' + state.me.username.toLowerCase()) viewProfile(state.me.username, 'posts');
+    }
     else if (a === 'dismiss-app-banner') { store('localStorage', BANNER_KEY, '1'); $('#app-banner')?.remove(); }
   } catch (err) {
     el.classList.remove('pop');
@@ -478,7 +499,136 @@ function openEditProfile() {
     <div class="field"><label>Name</label><input name="name" maxlength="50" value="${esc(u.name)}"></div>
     <div class="field"><label>Bio</label><textarea name="bio" rows="3" maxlength="160">${esc(u.bio || '')}</textarea></div>
     <div class="field"><label>Location</label><input name="location" maxlength="30" value="${esc(u.location || '')}"></div>
+    ${idealPicker('edit-ideal', u.ideal, { skipLabel: 'No ideal' })}
   </form></div>`);
+  revealIdeal($('#edit-ideal'));
+}
+
+// ---------- Choose your ideal (role model) ----------
+// Palette + presets come from /ideals.js (shared with the server). Colours are only ever taken from the
+// palette by quality key, never from user input; ideal names are always escaped.
+const IDEALS = window.ZUZU_IDEALS || { QUALITIES: [], PRESETS: [], CUSTOM_NAME_MAX: 40, CUSTOM_QUALITIES_MAX: 3 };
+const QMAP = new Map(IDEALS.QUALITIES.map(q => [q.key, q]));
+const qColor = (k) => (QMAP.get(k) || {}).color || '#71767b';
+const presetQs = (p) => [p.primary, ...(p.secondary || [])].filter(k => QMAP.has(k)).slice(0, 3);
+const IDEAL_PROMPT_KEY = 'zuzu.idealPromptDismissed';
+const idealPromptKey = () => IDEAL_PROMPT_KEY + '.' + (state.me ? state.me.id : '');
+const qChips = (keys) => keys.filter(k => QMAP.has(k)).map((k, i) => `<span class="q-chip${i ? '' : ' primary'}" style="--c:${qColor(k)}" data-q="${k}">${esc(QMAP.get(k).label)}</span>`).join('');
+function idealCard(key, name, desc, qs, selected) {
+  const c = qs.length ? qColor(qs[0]) : '';
+  return `<button type="button" class="ideal-card${key === 'custom' ? ' custom' : ''}${qs.length ? '' : ' empty'}" role="radio" aria-checked="${selected}" data-ideal-card="${key}" ${c ? `style="--c:${c}"` : ''}>
+    <span class="ic-check" aria-hidden="true">${ic('check')}</span>
+    <span class="ic-name">${esc(name)}</span><span class="ic-desc">${esc(desc)}</span>
+    <span class="ic-chips">${qChips(qs)}</span></button>`;
+}
+// The picker (sign-up, Edit profile, the "Choose your ideal" modal). `current` is a user's ideal or null.
+function idealPicker(id, current, { skipLabel = 'Skip for now' } = {}) {
+  const custom = current && current.custom;
+  const sel = !current ? 'skip' : custom ? 'custom' : current.preset_id;
+  const cqs = custom ? current.qualities.filter(k => QMAP.has(k)) : [];
+  const cname = custom ? current.name : '';
+  return `<section class="ideal-picker" id="${id}" data-sel="${esc(sel)}" data-qs="${cqs.join(',')}">
+    <div class="ideal-head"><h3>Choose your ideal</h3>
+      <button type="button" class="ideal-skip" role="radio" aria-checked="${sel === 'skip'}" data-ideal-card="skip">${ic('check')}<span>${esc(skipLabel)}</span></button></div>
+    <p class="ideal-sub">Who inspires you? Pick a role model. Each colour stands for the quality they’re known for.</p>
+    <div class="ideal-grid" role="radiogroup" aria-label="Choose your ideal">
+      ${IDEALS.PRESETS.map(p => idealCard(p.id, p.name, p.desc, presetQs(p), sel === p.id)).join('')}
+      ${idealCard('custom', cname || 'Make your own', cname ? 'Your own ideal' : 'A parent, teacher, friend… anyone who inspires you.', cqs, sel === 'custom')}
+    </div>
+    <div class="ideal-custom" ${sel === 'custom' ? '' : 'hidden'}>
+      <div class="field"><label>Your ideal’s name</label><input class="ideal-name" maxlength="${IDEALS.CUSTOM_NAME_MAX}" value="${esc(cname)}" placeholder="e.g. My grandmother" autocomplete="off" aria-label="Your ideal’s name"><span class="cnt">${[...cname].length}/${IDEALS.CUSTOM_NAME_MAX}</span></div>
+      <div class="q-label">Pick 1–${IDEALS.CUSTOM_QUALITIES_MAX} qualities. The first one sets the colour.</div>
+      <div class="q-pick">${IDEALS.QUALITIES.map(q => `<button type="button" class="q-opt" data-ideal-q="${q.key}" style="--c:${q.color}" aria-pressed="${cqs.includes(q.key)}" title="${esc(q.long)}"><span class="dot"></span>${esc(q.label)}<span class="ord">${cqs.includes(q.key) ? cqs.indexOf(q.key) + 1 : ''}</span></button>`).join('')}</div>
+    </div>
+    <div class="ideal-err" role="alert"></div>
+  </section>`;
+}
+function syncCustomCard(root) {
+  const qs = (root.dataset.qs || '').split(',').filter(k => QMAP.has(k));
+  const card = $('[data-ideal-card="custom"]', root), name = $('.ideal-name', root).value.replace(/\s+/g, ' ').trim();
+  if (qs.length) card.style.setProperty('--c', qColor(qs[0])); else card.style.removeProperty('--c');
+  card.classList.toggle('empty', !qs.length);
+  $('.ic-name', card).textContent = name || 'Make your own';
+  $('.ic-desc', card).textContent = name ? 'Your own ideal' : 'A parent, teacher, friend… anyone who inspires you.';
+  $('.ic-chips', card).innerHTML = qChips(qs);
+  $$('.q-opt', root).forEach(b => { const i = qs.indexOf(b.dataset.idealQ); b.setAttribute('aria-pressed', i >= 0); $('.ord', b).textContent = i >= 0 ? i + 1 : ''; });
+  $('.cnt', root).textContent = `${[...$('.ideal-name', root).value].length}/${IDEALS.CUSTOM_NAME_MAX}`;
+}
+// Scroll the selected card into view inside the grid (without moving the page).
+function revealIdeal(root) {
+  const g = root && $('.ideal-grid', root), c = g && $('[data-ideal-card][aria-checked="true"]', g);
+  if (!c) return;
+  if (c.offsetTop < g.scrollTop || c.offsetTop + c.offsetHeight > g.scrollTop + g.clientHeight) g.scrollTop = c.offsetTop - 8;
+  if (c.offsetLeft < g.scrollLeft || c.offsetLeft + c.offsetWidth > g.scrollLeft + g.clientWidth) g.scrollLeft = c.offsetLeft - 8;
+}
+function selectIdeal(root, key) {
+  root.dataset.sel = key;
+  $$('[data-ideal-card]', root).forEach(c => c.setAttribute('aria-checked', c.dataset.idealCard === key));
+  $('.ideal-custom', root).hidden = key !== 'custom';
+  $('.ideal-err', root).textContent = '';
+  revealIdeal(root);
+  if (key === 'custom' && !$('.ideal-name', root).value) $('.ideal-name', root).focus({ preventScroll: true });
+}
+// -> { ideal: null | {presetId} | {custom:{name, qualities}} } or { error }
+function readIdeal(root) {
+  if (!root) return { ideal: undefined };
+  const sel = root.dataset.sel;
+  if (!sel || sel === 'skip') return { ideal: null };
+  if (sel !== 'custom') return { ideal: { presetId: sel } };
+  const name = $('.ideal-name', root).value.replace(/\s+/g, ' ').trim();
+  const qualities = (root.dataset.qs || '').split(',').filter(k => QMAP.has(k));
+  if (!name) return { error: 'Give your ideal a name' };
+  if ([...name].length > IDEALS.CUSTOM_NAME_MAX) return { error: `Ideal name can be at most ${IDEALS.CUSTOM_NAME_MAX} characters` };
+  if (/[<>]/.test(name)) return { error: 'Ideal name can’t contain < or >' };
+  if (!qualities.length) return { error: 'Pick at least one quality for your ideal' };
+  return { ideal: { custom: { name, qualities } } };
+}
+function idealError(root, msg) {
+  const el = root && $('.ideal-err', root); if (el) el.textContent = msg;
+  if (root) root.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+document.addEventListener('click', (e) => {
+  const root = e.target.closest('.ideal-picker'); if (!root) return;
+  const card = e.target.closest('[data-ideal-card]'), q = e.target.closest('[data-ideal-q]');
+  if (card) { e.preventDefault(); selectIdeal(root, card.dataset.idealCard); }
+  else if (q) {
+    e.preventDefault();
+    let qs = (root.dataset.qs || '').split(',').filter(k => QMAP.has(k));
+    const k = q.dataset.idealQ;
+    if (qs.includes(k)) qs = qs.filter(x => x !== k);
+    else if (qs.length >= IDEALS.CUSTOM_QUALITIES_MAX) { $('.ideal-err', root).textContent = `You can pick up to ${IDEALS.CUSTOM_QUALITIES_MAX} qualities`; return; }
+    else qs.push(k);
+    root.dataset.qs = qs.join(',');
+    $('.ideal-err', root).textContent = '';
+    syncCustomCard(root);
+  }
+});
+document.addEventListener('input', (e) => { if (e.target.matches('.ideal-picker .ideal-name')) syncCustomCard(e.target.closest('.ideal-picker')); });
+// Profile badge: "Ideal: <name>" in the primary colour, with quality chips.
+function idealBadge(i) {
+  if (!i || !i.name) return '';
+  return `<div class="ideal-badge" style="--c:${qColor(i.primary)}" data-primary="${esc(i.primary || '')}" ${i.description ? `title="${esc(i.description)}"` : ''}><span class="dot"></span><span class="lbl">Ideal: <b>${esc(i.name)}</b></span><span class="chips">${qChips(i.qualities || [])}</span></div>`;
+}
+const idealDot = (i) => i && i.name ? `<span class="ideal-dot" style="--c:${qColor(i.primary)}" title="Ideal: ${esc(i.name)}" aria-label="Ideal: ${esc(i.name)}"></span>` : '';
+function idealPrompt() {
+  if (!state.me || state.me.ideal || store('localStorage', idealPromptKey()) === '1') return '';
+  const dots = IDEALS.QUALITIES.map(q => `<span style="background:${q.color}"></span>`).join('');
+  return `<div class="ideal-prompt" id="ideal-prompt" role="region" aria-label="Choose your ideal"><div class="ip-dots" aria-hidden="true">${dots}</div>
+    <div class="ip-body"><div class="t">Choose your ideal</div><div class="s">Who inspires you? Add a role model to your profile, coloured by the quality you admire.</div>
+    <button class="btn btn-light" data-action="open-ideal">Choose your ideal</button></div>
+    <button class="x" data-action="dismiss-ideal-prompt" aria-label="Dismiss">${ic('close')}</button></div>`;
+}
+function openIdealModal({ welcome = false } = {}) {
+  openModal(`<div class="modal ideal-modal"><div class="modal-head"><button class="back" data-action="close-modal" aria-label="Close">${ic('close')}</button><h2>${welcome ? 'Welcome to ZuZu!' : 'Your ideal'}</h2><button class="btn btn-light" data-action="save-ideal">Save</button></div>
+    ${idealPicker('ideal-modal-picker', state.me && state.me.ideal, { skipLabel: state.me && state.me.ideal ? 'No ideal' : 'Skip for now' })}</div>`);
+  revealIdeal($('#ideal-modal-picker'));
+}
+async function saveIdealFrom(root) {
+  const r = readIdeal(root);
+  if (r.error) { idealError(root, r.error); return null; }
+  const { user } = await api('PUT', '/api/me/ideal', { ideal: r.ideal });
+  state.me = { ...state.me, ideal: user.ideal };
+  return user;
 }
 
 // ---------- views ----------
@@ -499,6 +649,7 @@ function viewAuth(mode) {
         ${signup ? `<div class="field"><label>Name</label><input name="name" maxlength="50" autocomplete="name"></div>` : ''}
         <div class="field"><label>Username</label><input name="username" required autocapitalize="none" autocomplete="username" ${signup ? 'placeholder="e.g. akhil_rajan" autocorrect="off" spellcheck="false"' : ''}></div>
         <div class="field"><label>Password</label><input name="password" type="password" required ${signup ? 'minlength="6" autocomplete="new-password"' : 'autocomplete="current-password"'}></div>
+        ${signup ? idealPicker('signup-ideal', null) : ''}
         <button class="btn btn-light" type="submit">${signup ? 'Create account' : 'Log in'}</button>
         <div class="err" role="alert">${googleError ? 'Couldn’t sign in with Google. Please try again, or use your username and password.' : ''}</div>
       </form>
@@ -525,8 +676,14 @@ function viewHome() {
       <button class="tab ${t === 'following' ? 'active' : ''}" data-action="home-tab" data-tab="following">Following</button>
     </div></div>
     ${appBanner()}
+    ${idealPrompt()}
     ${composerHTML({ id: 'home-composer' })}
     <div id="feed">${loader()}</div>`, { active: 'home' });
+  // First Google sign-in lands on /home?ideal=1: offer the picker once.
+  if (new URLSearchParams(location.search).get('ideal') === '1') {
+    history.replaceState({}, '', '/home');
+    if (!state.me.ideal) openIdealModal({ welcome: true });
+  }
   loadFeed(t === 'following' ? '/api/feed/home' : '/api/feed/explore',
     `<div class="empty"><h3>Welcome to ZuZu!</h3><p>Follow some people to fill your timeline, or check the For you tab.</p><a class="btn btn-primary" href="/explore" data-link>Explore</a></div>`);
 }
@@ -583,7 +740,7 @@ async function viewPost(id) {
     const mine = p.user_id === state.me.id;
     el.innerHTML = `${ancestors.map(a => postHTML(a, { thread: true })).join('')}
       <div class="focus" data-post="${p.id}">
-        <div class="head"><a href="/u/${esc(p.username)}" data-link>${avatar(p)}</a><div class="who"><a href="/u/${esc(p.username)}" data-link><b>${esc(p.name)}</b></a><div style="color:var(--muted)">@${esc(p.username)}</div></div>
+        <div class="head"><a href="/u/${esc(p.username)}" data-link>${avatar(p)}</a><div class="who"><a href="/u/${esc(p.username)}" data-link><b>${esc(p.name)}</b></a>${idealDot(p.ideal)}<div style="color:var(--muted)">@${esc(p.username)}</div></div>
           ${aiBtn(p)}<button class="more" style="position:relative;width:34px;height:34px;border-radius:50%;color:var(--muted)" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}">${ic('dots')}</button></div>
         ${p.reply_to ? `<div class="replying" style="margin-top:8px">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
         ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
@@ -615,6 +772,7 @@ async function viewProfile(username, tab) {
       <div class="top">${avatar(u, 'lg')}${isMe ? `<button class="btn btn-outline" data-action="edit-profile">Edit profile</button>` : `<div class="pf-actions"><button class="btn btn-outline btn-icon" data-action="dm-user" data-username="${esc(u.username)}" aria-label="Message" title="Message">${ic('mail')}</button>${followBtn(u)}</div>`}</div>
       <div class="name">${esc(u.name)}</div>
       <div class="handle">@${esc(u.username)}${u.follows_you ? '<span class="follows-you">Follows you</span>' : ''}</div>
+      ${u.ideal ? idealBadge(u.ideal) : isMe ? `<button class="ideal-add" data-action="open-ideal">${ic('sparkle')}Choose your ideal</button>` : ''}
       ${u.bio ? `<div class="bio">${richText(u.bio)}</div>` : '<div style="height:12px"></div>'}
       <div class="facts">${u.location ? `<span>${ic('pin')}${esc(u.location)}</span>` : ''}<span>${ic('cal')}Joined ${new Date(u.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span></div>
       <div class="counts"><a href="/u/${esc(u.username)}/following" data-link><b>${u.following}</b> Following</a><a href="/u/${esc(u.username)}/followers" data-link><b id="followers-count">${u.followers}</b> Followers</a></div>
@@ -1167,6 +1325,15 @@ function adminTable(list) {
     <tr><td><a href="/u/${esc(u.username)}" data-link class="adm-user"><span class="n">${esc(u.name)}</span><span class="h">@${esc(u.username)}</span></a></td>
     <td class="t">${esc(istTime(u.created_at))}</td><td>${u.google ? '<span class="pill pill-g">Google</span>' : '<span class="pill">Password</span>'}</td></tr>`).join('')}</tbody></table></div>`;
 }
+function adminIdeals(d) {
+  const maxQ = Math.max(1, ...d.by_quality.map(q => q.count));
+  const qs = d.by_quality.map(q => `<div class="iq-row" data-quality="${esc(q.quality)}" data-count="${q.count}"><span class="iq-l"><span class="dot" style="background:${qColor(q.quality)}"></span>${esc(q.label)}</span>
+    <span class="iq-bar"><span style="width:${q.count ? Math.max(3, Math.round(q.count / maxQ * 100)) : 0}%;background:${qColor(q.quality)}"></span></span><span class="iq-n">${num(q.count)}</span></div>`).join('');
+  const top = d.by_ideal.length ? d.by_ideal.slice(0, 15).map(i => `<div class="ii-row" data-count="${i.count}"><span class="dot" style="background:${qColor(i.primary)}"></span><span class="n">${esc(i.name)}</span>${i.custom ? '<span class="pill">custom</span>' : ''}<span class="iq-n">${num(i.count)}</span></div>`).join('')
+    : '<div class="stat-sub">No ideals chosen yet.</div>';
+  return `<div class="chart-card ideal-breakdown" id="ideal-breakdown"><div class="chart-head"><h2>Ideals chosen</h2><span class="stat-sub">${num(d.users_with_ideal)} real user${d.users_with_ideal === 1 ? '' : 's'} chose an ideal · ${num(d.users_without_ideal)} skipped · ${num(d.custom)} made their own</span></div>
+    <div class="ib-cols"><div><div class="ib-t">By primary quality</div>${qs}</div><div><div class="ib-t">Top ideals</div>${top}</div></div></div>`;
+}
 function renderAdmin(s) {
   const el = $('#admin-body'); if (!el) return;
   const su = s.signups;
@@ -1182,6 +1349,7 @@ function renderAdmin(s) {
       ${adminCard('DMs', num(s.dms.total), `${num(s.dms.today)} today`, 'dms')}
     </div>
     ${adminChart(s.daily_signups)}
+    ${s.ideals ? adminIdeals(s.ideals) : ''}
     <div class="section-title">Latest sign-ups</div>
     ${adminTable(s.latest_signups)}
     <div class="footer-note">Demo/seeded accounts are excluded from sign-ups. ${num(s.users.google)} real user${s.users.google === 1 ? '' : 's'} joined with Google. Today is ${esc(s.today)} (IST).</div>`;
