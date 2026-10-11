@@ -15,6 +15,7 @@ function client() {
   return c;
 }
 (async () => {
+  if (process.env.API_ONLY === 'video') { await videoTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); } // quick run of one section
   const u = 'tester' + Math.floor(Math.random() * 1e5);
   const a = client(), d = client();
   let r = await a('POST', '/api/signup', { username: u, password: 'secret123', name: 'Test User' });
@@ -75,6 +76,7 @@ function client() {
   await googleTests();
   await adminTests();
   await idealTests();
+  await videoTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
 
@@ -885,9 +887,208 @@ async function monkeyTests() {
     // service worker never caches /api/monkey; cache version bumped
     const sw = await (await fetch(on.url + '/sw.js')).text();
     const bypass = new Function('return ' + sw.match(/const BYPASS = (\/.*\/);/)[1])();
-    ok(bypass.test('/api/monkey/thought/1') && /\/api\/monkey/.test(sw) && /const CACHE = 'zuzu-v7'/.test(sw), 'service worker never caches /api/monkey (cache zuzu-v7)');
+    ok(bypass.test('/api/monkey/thought/1') && /\/api\/monkey/.test(sw) && +((sw.match(/const CACHE = 'zuzu-v(\d+)'/) || [])[1] || 0) >= 7, 'service worker never caches /api/monkey (cache zuzu-v7+)');
   } finally {
     on.child.kill(); off.child.kill(); mock.srv.close();
     await clearMockThoughts().catch((e) => console.log('  (could not clear mock thoughts: ' + e.message + ')'));
+  }
+}
+
+// ---------- Video posts + Reels (Cloudinary), against a local mock Cloudinary ----------
+async function videoTests() {
+  console.log('\n  Video posts + Reels');
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) { console.log('  (skipping video tests: needs a local server)'); return; }
+  const fs = require('fs');
+  const crypto = require('crypto');
+  const { startApp } = require('./ai-server');
+  const { startMockCloudinary, makeVideo, sign, CLOUD, KEY, SECRET, OTHER } = require('./cloudinary-server');
+  const mock = await startMockCloudinary();
+  const ADMIN_TOKEN = crypto.randomBytes(16).toString('hex');
+  const on = await startApp({ port: 4214, env: { ...mock.env, ADMIN_TOKEN } });
+  const off = await startApp({ port: 4215 });
+  const bad = await startApp({ port: 4216, env: { CLOUDINARY_URL: 'not-a-cloudinary-url' } });
+  const rnd = Math.floor(Math.random() * 1e6);
+  const mk = async (base, name) => {
+    let cookie = '';
+    const c = async (method, p, body, isForm) => {
+      const headers = cookie ? { cookie } : {};
+      let b; if (isForm) b = body; else if (body) { headers['content-type'] = 'application/json'; b = JSON.stringify(body); }
+      const r = await fetch(base + p, { method, headers, body: b });
+      const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+      return { status: r.status, headers: r.headers, data: await r.json().catch(() => ({})) };
+    };
+    if (name) { const r = await c('POST', '/api/signup', { username: name + rnd, password: 'secret123', name: name + ' Person' }); if (r.status !== 200) throw new Error('signup ' + name); c.user = r.data.user; }
+    return c;
+  };
+  // What the browser does: POST the file + exactly the signed params to the upload URL.
+  const uploadTo = async (s, file, { tamper } = {}) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(s.params)) f.append(k, String(v));
+    if (tamper) f.set('folder', 'elsewhere');
+    f.append('file', new Blob([fs.readFileSync(file)], { type: 'video/mp4' }), require('path').basename(file));
+    const r = await fetch(s.uploadUrl, { method: 'POST', body: f });
+    return { status: r.status, data: await r.json() };
+  };
+  const postVideo = async (c, v, { reel = false, text = 'video post ' + Math.random().toString(36).slice(2, 7), json = false, parent } = {}) => {
+    if (json) return c('POST', '/api/posts', { text, video: v, is_reel: reel, parent_id: parent });
+    const f = new FormData(); f.append('text', text); f.append('video', JSON.stringify(v)); if (reel) f.append('is_reel', '1'); if (parent) f.append('parent_id', String(parent));
+    return c('POST', '/api/posts', f, true);
+  };
+  const waitFor = async (fn, ms = 4000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 100)); } return false; };
+  try {
+    // config
+    let r = await (await fetch(on.url + '/api/config')).json(); ok(r.video === true, '/api/config -> video:true with CLOUDINARY_URL');
+    r = await (await fetch(off.url + '/api/config')).json(); ok(r.video === false, '/api/config -> video:false without CLOUDINARY_URL (app starts fine)');
+    r = await (await fetch(bad.url + '/api/config')).json(); ok(r.video === false, 'malformed CLOUDINARY_URL -> video:false, app still starts');
+    ok(!/test-cloudinary-secret|not-a-cloudinary-url/.test(on.log() + bad.log()), 'server logs never print the Cloudinary secret / URL');
+
+    // sign
+    const anon = await mk(on.url);
+    r = await anon('POST', '/api/video/sign'); ok(r.status === 401, 'POST /api/video/sign requires login (401)');
+    const A = await mk(on.url, 'vida'), B = await mk(on.url, 'vidb');
+    const O = await mk(off.url, 'vidoff');
+    r = await O('POST', '/api/video/sign'); ok(r.status === 503, 'sign -> 503 when Cloudinary is not configured');
+    r = await A('POST', '/api/video/sign');
+    const s = r.data;
+    ok(r.status === 200 && s.cloudName === CLOUD && s.apiKey === KEY && s.folder === 'zuzu' && s.resource_type === 'video' && /^\d{10}$/.test(String(s.timestamp)), 'sign returns cloudName, apiKey, timestamp, folder:zuzu, resource_type:video');
+    ok(Math.abs(s.timestamp - Date.now() / 1000) < 60 && /no-store/.test(r.headers.get('cache-control') || ''), 'timestamp is now (seconds); response not cacheable');
+    ok(!JSON.stringify(s).includes(SECRET), 'the API secret is never sent to the browser');
+    const { api_key, signature, ...signed } = s.params;
+    const expect = crypto.createHash('sha1').update(Object.keys(signed).sort().map(k => `${k}=${signed[k]}`).join('&') + SECRET).digest('hex');
+    ok(s.signature === expect && signature === expect && api_key === KEY, 'signature = SHA-1(sorted params + secret), verified with the known secret');
+    ok(signed.folder === 'zuzu' && signed.context === 'uid=' + A.user.id && /mp4/.test(signed.eager) && signed.eager_async === 'true' && signed.allowed_formats === 'mp4,mov,webm,3gp,mkv', 'signed: folder, uploader uid context, eager (async) mp4 + poster, allowed formats');
+    ok(s.uploadUrl === mock.url + '/v1_1/' + CLOUD + '/video/upload' && s.limits.maxBytes === 100 * 1024 * 1024 && s.limits.maxSeconds === 180 && s.limits.maxReelSeconds === 90, 'upload URL (CLOUDINARY_API_BASE override) + limits 100 MB / 3 min / 90 s reels');
+    ok(sign({ ...s.params }, SECRET) === s.signature, 'mock Cloudinary computes the same signature');
+
+    // direct upload to (mock) Cloudinary
+    let u = await uploadTo(s, makeVideo({ w: 360, h: 640, seconds: 2 }), { tamper: true });
+    ok(u.status === 401, 'tampered upload params are rejected by Cloudinary (signature mismatch)');
+    const vert = await uploadTo(s, makeVideo({ w: 360, h: 640, seconds: 2 }));
+    const horiz = await uploadTo(s, makeVideo({ w: 640, h: 360, seconds: 3 }));
+    ok(vert.status === 200 && /^zuzu\//.test(vert.data.public_id) && vert.data.height > vert.data.width && horiz.status === 200, 'direct signed uploads (vertical + horizontal mp4) accepted: ' + vert.data.public_id);
+    const claim = (d, extra = {}) => ({ public_id: d.public_id, version: d.version, duration: d.duration, width: d.width, height: d.height, bytes: d.bytes, ...extra });
+
+    // create posts
+    const nRes = mock.calls.resource.length;
+    r = await postVideo(A, claim(vert.data), { reel: true, text: 'My first reel #reels' });
+    const reel1 = r.data.post;
+    ok(r.status === 200 && reel1.video && reel1.video.public_id === vert.data.public_id && reel1.video.is_reel === true, 'POST /api/posts with a video (reel) works');
+    const lookup = mock.calls.resource[nRes];
+    ok(lookup && lookup.cloud === CLOUD && lookup.rtype === 'video' && lookup.public_id === vert.data.public_id && lookup.query.media_metadata === 'true', 'server verified the asset via Admin API GET resources/video/upload/<public_id> (basic auth)');
+    ok(Math.abs(reel1.video.duration - 2) < 0.2 && reel1.video.width === 360 && reel1.video.height === 640, 'duration/width/height come from Cloudinary metadata');
+    const srcs = reel1.video.sources.map(x => x.src);
+    ok(srcs[0].startsWith(mock.url + '/' + CLOUD + '/video/upload/') && /f_auto/.test(srcs[0]) && /q_auto/.test(srcs[0]) && /vc_auto/.test(srcs[0]) && /w_720/.test(srcs[0]), 'source 1: f_auto,q_auto,vc_auto,w_720 (c_limit)');
+    ok(/vc_h264/.test(srcs[1]) && /\.mp4$/.test(srcs[1]) && reel1.video.sources[1].type === 'video/mp4', 'source 2: H.264 MP4 fallback');
+    ok(/so_\d/.test(reel1.video.poster) && /\.jpg$/.test(reel1.video.poster), 'poster is a so_1 JPG frame: ' + reel1.video.poster.replace(mock.url, ''));
+    ok(signed.eager.split('|').some(e => srcs[1].includes(e.split('/')[0])), 'eager MP4 transformation matches the fallback URL exactly');
+    let d = await fetch(reel1.video.poster); ok(d.status === 200 && d.headers.get('content-type') === 'image/jpeg', 'poster URL serves a JPEG (mock delivery)');
+    r = await postVideo(A, claim(horiz.data), { json: true, text: 'Landscape clip' });
+    const vpost = r.data.post;
+    ok(r.status === 200 && vpost.video && vpost.video.is_reel === false && vpost.video.width === 640, 'JSON body works too; horizontal video posted as a normal video post');
+    r = await postVideo(A, claim(vert.data), { reel: true }); ok(r.status === 409, 'the same Cloudinary asset can’t be posted twice (409)');
+    r = await postVideo(A, { public_id: vert.data.public_id }, { reel: false, text: '' }); ok(r.status === 409, 'empty text is fine for video posts (still blocked as duplicate)');
+
+    // rejections
+    mock.seed(OTHER, 'video', { public_id: 'zuzu/foreign' + rnd, context: { custom: { uid: String(A.user.id) } } });
+    r = await postVideo(A, { public_id: 'zuzu/foreign' + rnd }); ok(r.status === 400, 'a public_id from another cloud is rejected (not on our cloud): ' + r.data.error);
+    mock.seed(CLOUD, 'video', { public_id: 'zuzu/ok' + rnd, context: { custom: { uid: String(A.user.id) } } });
+    r = await postVideo(A, { public_id: 'zuzu/ok' + rnd, cloud_name: OTHER }); ok(r.status === 400, 'claimed cloud_name of another cloud is rejected');
+    r = await postVideo(A, { public_id: 'zuzu/ok' + rnd, secure_url: `https://res.cloudinary.com/${OTHER}/video/upload/v1/zuzu/ok${rnd}.mp4` }); ok(r.status === 400, 'secure_url from another cloud is rejected');
+    mock.seed(CLOUD, 'image', { public_id: 'zuzu/pic' + rnd, format: 'jpg', duration: undefined });
+    r = await postVideo(A, { public_id: 'zuzu/pic' + rnd }); ok(r.status === 400, 'a non-video asset (image) is rejected: ' + r.data.error);
+    mock.seed(CLOUD, 'video', { public_id: 'zuzu/audio' + rnd, format: 'mp3', is_audio: true });
+    r = await postVideo(A, { public_id: 'zuzu/audio' + rnd }); ok(r.status === 400, 'audio-only asset rejected');
+    mock.seed(CLOUD, 'video', { public_id: 'zuzu/avi' + rnd, format: 'avi' });
+    r = await postVideo(A, { public_id: 'zuzu/avi' + rnd }); ok(r.status === 400 && /format/i.test(r.data.error), 'disallowed format (avi) rejected');
+    mock.seed(CLOUD, 'video', { public_id: 'zuzu/long' + rnd, duration: 181.5 });
+    r = await postVideo(A, { public_id: 'zuzu/long' + rnd }); ok(r.status === 400 && /3 minutes/.test(r.data.error), 'over-duration video (181.5 s > 3 min) rejected: ' + r.data.error);
+    mock.seed(CLOUD, 'video', { public_id: 'zuzu/big' + rnd, bytes: 100 * 1024 * 1024 + 1 });
+    r = await postVideo(A, { public_id: 'zuzu/big' + rnd }); ok(r.status === 400 && /100 MB/.test(r.data.error), 'over-size video (> 100 MB) rejected');
+    mock.seed(CLOUD, 'video', { public_id: 'zuzu/r95' + rnd, duration: 95 });
+    r = await postVideo(A, { public_id: 'zuzu/r95' + rnd }, { reel: true }); ok(r.status === 400 && /90 seconds/.test(r.data.error), 'reel over 90 s rejected: ' + r.data.error);
+    r = await postVideo(A, { public_id: 'zuzu/r95' + rnd }, { reel: false }); ok(r.status === 200 && r.data.post.video.duration === 95, 'the same 95 s clip is fine as a normal video post');
+    const p95 = r.data.post;
+    mock.seed(CLOUD, 'video', { public_id: 'elsewhere/x' + rnd, folder: 'elsewhere', asset_folder: 'elsewhere' });
+    r = await postVideo(A, { public_id: 'elsewhere/x' + rnd }); ok(r.status === 400, 'asset outside the zuzu folder rejected');
+    mock.seed(CLOUD, 'video', { public_id: 'zuzu/theirs' + rnd, context: { custom: { uid: String(B.user.id) } } });
+    r = await postVideo(A, { public_id: 'zuzu/theirs' + rnd }); ok(r.status === 403, 'someone else’s upload can’t be posted (signed uid context)');
+    r = await postVideo(A, { public_id: '../../etc/passwd' }); ok(r.status === 400, 'junk public_id rejected');
+    r = await postVideo(A, 'not json'); ok(r.status === 400, 'malformed video field rejected');
+    const pf = new FormData(); pf.append('text', 'both'); pf.append('video', JSON.stringify({ public_id: 'zuzu/ok' + rnd }));
+    pf.append('image', new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')], { type: 'image/png' }), 'a.png');
+    r = await A('POST', '/api/posts', pf, true); ok(r.status === 400, 'photo + video in one post rejected');
+    const OF = await mk(off.url, 'vidoff2');
+    r = await postVideo(OF, { public_id: 'zuzu/ok' + rnd }); ok(r.status === 503, 'video post -> 503 when Cloudinary is not configured');
+
+    // reply with a video (not a reel even if asked)
+    mock.seed(CLOUD, 'video', { public_id: 'zuzu/reply' + rnd, duration: 5, context: { custom: { uid: String(B.user.id) } } });
+    r = await postVideo(B, { public_id: 'zuzu/reply' + rnd }, { reel: true, parent: vpost.id, text: 'video reply' });
+    const vreply = r.data.post;
+    ok(r.status === 200 && vreply.parent_id === vpost.id && vreply.video && vreply.video.is_reel === false, 'video replies work (never Reels)');
+
+    // reels listing + pagination
+    const reelIds = [reel1.id];
+    for (let i = 0; i < 4; i++) {
+      mock.seed(CLOUD, 'video', { public_id: `zuzu/reel${i}_${rnd}`, duration: 10 + i, context: { custom: { uid: String(B.user.id) } } });
+      r = await postVideo(B, { public_id: `zuzu/reel${i}_${rnd}` }, { reel: true, text: 'Reel number ' + i });
+      reelIds.push(r.data.post.id);
+    }
+    r = await anon('GET', '/api/reels'); ok(r.status === 401, 'GET /api/reels requires login');
+    r = await A('GET', '/api/reels?limit=2');
+    const p1 = r.data;
+    ok(r.status === 200 && p1.items.length === 2 && p1.items.every(x => x.video && x.video.is_reel) && p1.next_cursor === p1.items[1].id, 'GET /api/reels?limit=2 -> 2 reels + next_cursor');
+    ok(p1.items[0].id > p1.items[1].id && p1.items[0].id === Math.max(...reelIds), 'reels newest first');
+    r = await A('GET', `/api/reels?cursor=${p1.next_cursor}&limit=2`);
+    const p2 = r.data;
+    ok(p2.items.length === 2 && p2.items.every(x => x.id < p1.next_cursor) && !p2.items.some(x => p1.items.some(y => y.id === x.id)), 'GET /api/reels?cursor= returns the next page, no duplicates');
+    const all = []; let cur = '';
+    for (let i = 0; i < 50; i++) { const q = await A('GET', `/api/reels?limit=3${cur ? '&cursor=' + cur : ''}`); all.push(...q.data.items.map(x => x.id)); if (!q.data.next_cursor) break; cur = q.data.next_cursor; }
+    ok(reelIds.every(id => all.includes(id)) && !all.includes(vpost.id) && !all.includes(p95.id) && !all.includes(vreply.id) && new Set(all).size === all.length, `paging to the end visits every reel once (${all.length}), never normal videos or replies`);
+
+    // feeds + profile tabs
+    r = await A('GET', '/api/feed/explore?limit=50'); ok(r.data.items.some(x => x.id === vpost.id && x.video && x.video.poster), 'video posts appear in feeds with their video');
+    r = await A('GET', `/api/users/${A.user.username}/posts?tab=reels`);
+    ok(r.data.items.length === 1 && r.data.items[0].id === reel1.id, 'profile ?tab=reels lists only that user’s reels');
+    r = await A('GET', `/api/users/${A.user.username}/posts?tab=media`);
+    ok([reel1.id, vpost.id, p95.id].every(id => r.data.items.some(x => x.id === id)), 'profile Media tab includes video posts');
+    r = await A('GET', `/api/posts/${reel1.id}`); ok(r.data.post.video && r.data.post.video.is_reel, 'GET /api/posts/:id includes the video (for /reels/:id links)');
+
+    // admin stats
+    r = await (await fetch(on.url + '/api/admin/stats', { headers: { authorization: 'Bearer ' + ADMIN_TOKEN } })).json();
+    ok(r.videos && r.videos.total >= 8 && r.videos.reels >= 5 && r.videos.today >= 8 && r.videos.reels_today >= 5, `admin stats: videos ${r.videos && r.videos.total}, reels ${r.videos && r.videos.reels}`);
+
+    // delete -> signed destroy
+    let n = mock.calls.destroy.length;
+    r = await A('DELETE', '/api/posts/' + reel1.id);
+    ok(r.status === 200 && await waitFor(() => mock.calls.destroy.slice(n).some(x => x.public_id === vert.data.public_id)), 'deleting a post calls Cloudinary destroy for its video');
+    const call = mock.calls.destroy.find(x => x.public_id === vert.data.public_id);
+    ok(call.cloud === CLOUD && call.rtype === 'video' && call.invalidate === 'true' && !mock.resources.has(`${CLOUD}/video/${vert.data.public_id}`), 'destroy is signed (mock verified), resource_type video, invalidate=true');
+    n = mock.calls.destroy.length;
+    r = await A('DELETE', '/api/posts/' + vpost.id);
+    ok(await waitFor(() => { const ids = mock.calls.destroy.slice(n).map(x => x.public_id); return ids.includes(horiz.data.public_id) && ids.includes('zuzu/reply' + rnd); }), 'deleting a post also destroys the videos of its (cascaded) replies');
+    r = await A('GET', `/api/posts/${vreply.id}`); ok(r.status === 404, 'video reply removed with its parent');
+
+    // discard an unposted upload (composer cancelled after upload)
+    const s2 = (await A('POST', '/api/video/sign')).data;
+    const extra = await uploadTo(s2, makeVideo({ w: 360, h: 640, seconds: 2 }));
+    r = await B('POST', '/api/video/discard', { public_id: extra.data.public_id }); ok(r.status === 403, 'can’t discard someone else’s upload');
+    n = mock.calls.destroy.length;
+    r = await A('POST', '/api/video/discard', { public_id: extra.data.public_id });
+    ok(r.status === 200 && await waitFor(() => mock.calls.destroy.slice(n).some(x => x.public_id === extra.data.public_id)), 'POST /api/video/discard destroys an unposted upload');
+    r = await A('POST', '/api/video/discard', { public_id: p95.video.public_id }); ok(r.status === 409, 'posted videos can’t be discarded');
+
+    // service worker
+    const sw = await (await fetch(on.url + '/sw.js')).text();
+    const bypass = new Function('return ' + sw.match(/const BYPASS = (\/.*\/);/)[1])();
+    ok(bypass.test('/api/video/sign') && bypass.test('/api/reels') && /cloudinary/.test(sw) && /destination === 'video'/.test(sw) && /range/i.test(sw), 'service worker never caches /api/video, /api/reels, Cloudinary URLs or video/range requests');
+    ok(+((sw.match(/const CACHE = 'zuzu-v(\d+)'/) || [])[1] || 0) >= 8, 'service worker cache bumped (zuzu-v8)');
+    // tidy the local DB: remove this run's remaining video posts (their assets only exist in the mock)
+    for (const c of [A, B]) {
+      const mine = await c('GET', `/api/users/${c.user.username}/posts?tab=media`);
+      for (const x of mine.data.items || []) if (x.video) await c('DELETE', '/api/posts/' + x.id);
+    }
+    ok(await waitFor(async () => !(await A('GET', '/api/reels?limit=30')).data.items.some(x => x.username === A.user.username || x.username === B.user.username)), 'cleanup: this run’s reels removed');
+  } finally {
+    on.child.kill(); off.child.kill(); bad.child.kill(); await mock.close(); require('./cloudinary-server').cleanup();
   }
 }

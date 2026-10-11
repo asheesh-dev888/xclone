@@ -24,6 +24,11 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     return c;
   };
   const errors = [];
+  if (process.env.UI_ONLY === 'video') { // quick run of one section
+    await videoUi(browser, errors, (m) => console.log('  ✓', m));
+    console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
+    await browser.close(); process.exit(errors.length ? 1 : 0);
+  }
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   const page = await ctx.newPage();
   page.on('pageerror', e => errors.push(e.message));
@@ -188,6 +193,8 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await adminUi(browser, errors, step, await ctx.storageState());
   console.log('\n  Choose your ideal');
   await idealUi(browser, errors, step);
+  console.log('\n  Video posts + Reels');
+  await videoUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
   await browser.close();
   process.exit(errors.length ? 1 : 0);
@@ -1142,6 +1149,316 @@ async function monkeyUi(browser, errors, step) {
     step(`${n} mocked Groq calls, one per post at most (${new Set(fetched).size} posts, ${fetched.length} fetches); never the real API`);
   } finally {
     app.child.kill(); mock.srv.close();
+    await clearMockThoughts().catch(() => {});
+  }
+}
+
+// ---------- Video posts + Reels (against a local mock Cloudinary) ----------
+async function videoUi(browser, errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping video UI: needs a local server)');
+  const fs = require('fs');
+  const watch = (p) => { p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
+  const { startMockGroq, startApp, clearMockThoughts } = require('./ai-server');
+  const { startMockCloudinary, makeVideo, cleanup } = require('./cloudinary-server');
+  const vert = makeVideo({ w: 360, h: 640, seconds: 3 }), horiz = makeVideo({ w: 320, h: 180, seconds: 2 });
+  const vert2 = makeVideo({ w: 360, h: 640, seconds: 2 }), long = makeVideo({ w: 64, h: 36, seconds: 185 });
+  const vSize = fs.statSync(vert).size, hSize = fs.statSync(horiz).size;
+  if (hSize >= vSize / 2) throw new Error('test clips: horizontal should be much smaller than vertical');
+  const mock = await startMockCloudinary({ uploadDelayMs: 450 });
+  const groq = await startMockGroq();
+  const chunk = Math.ceil(vSize / 3);
+  const on = await startApp({ port: 4224, ai: { baseUrl: groq.url }, env: { ...mock.env, VIDEO_CHUNK_THRESHOLD: String(Math.floor(vSize / 2)), VIDEO_CHUNK_SIZE: String(chunk) } });
+  const off = await startApp({ port: 4225 });
+  const B = on.url;
+  const desktop = { viewport: { width: 1366, height: 900 } };
+  const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+  const rnd = Math.floor(Math.random() * 1e5);
+  const contexts = [];
+  const newUser = async (base, name, opts = desktop) => {
+    const ctx = await browser.newContext(opts); contexts.push(ctx);
+    const r = await ctx.request.post(base + '/api/signup', { data: { username: name + rnd, password: 'secret123', name: name.toUpperCase() + ' Tester' } });
+    if (!r.ok()) throw new Error('signup failed ' + name);
+    const page = await ctx.newPage(); watch(page); page.on('dialog', d => d.accept());
+    const out = { ctx, page, user: (await r.json()).user };
+    if (base === B) users.push(out);
+    return out;
+  };
+  // Poll a <video> (Playwright selectors, e.g. :has-text) until it is really playing / paused.
+  const waitVideo = async (p, sel, want, ms) => {
+    const t0 = Date.now(); let last;
+    while (Date.now() - t0 < ms) {
+      last = await p.locator(sel).first().evaluate((v) => ({ paused: v.paused, t: v.currentTime, rs: v.readyState, err: v.error && v.error.code })).catch(() => null);
+      if (last && (want === 'playing' ? !last.paused && last.t > 0.05 && last.rs >= 2 : last.paused)) return;
+      await p.waitForTimeout(100);
+    }
+    throw new Error(`video ${sel} not ${want}: ${JSON.stringify(last)}`);
+  };
+  const playing = (p, sel) => waitVideo(p, sel, 'playing', 10000);
+  const paused = (p, sel) => waitVideo(p, sel, 'paused', 8000);
+  const signs = []; // POST /api/video/sign requests seen by the browser
+  const users = [];
+  const tidy = async () => {
+    let n = 0;
+    for (const { ctx, user } of users) {
+      const items = (await (await ctx.request.get(`${B}/api/users/${user.username}/posts?tab=media`)).json()).items || [];
+      for (const x of items) if (x.video) { await ctx.request.delete(`${B}/api/posts/${x.id}`); n++; }
+    }
+    return n;
+  };
+  try {
+    // ---------- composer: vertical clip, chunked upload with progress, auto-suggested Reel ----------
+    const A = await newUser(B, 'vida');
+    let p = A.page;
+    p.on('request', (q) => { if (q.url().endsWith('/api/video/sign')) signs.push(q.url()); });
+    await p.goto(B + '/home'); await p.waitForSelector('#home-composer');
+    if (!(await p.isVisible('#home-composer .tool-video'))) throw new Error('video button missing next to the image button');
+    const order = await p.evaluate(() => [...document.querySelectorAll('#home-composer .tool-row .tool')].map(l => l.className));
+    if (!/tool$/.test(order[0]) || !/tool-video/.test(order[1])) throw new Error('video button should come right after the image button: ' + order);
+    if (await p.getAttribute('#home-composer input[name=video]', 'accept') !== 'video/*,.mkv,.3gp,.mov') throw new Error('video input accept is wrong');
+    if (await p.isVisible('#home-composer .tool-record')) throw new Error('camera record button should only show on touch devices');
+    if (!(await p.isVisible('.nav a[href="/reels"]'))) throw new Error('Reels missing from the left nav');
+    step('composer has a video button (accept video/*) next to the image button; Reels in the left nav');
+
+    // client-side limits: wrong type and over 3 minutes are refused before any upload
+    await p.setInputFiles('#home-composer input[name=video]', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') });
+    await p.waitForSelector('#toast:not([hidden]):has-text("MP4, MOV, WebM, 3GP or MKV")');
+    await p.setInputFiles('#home-composer input[name=video]', long);
+    await p.waitForSelector('#toast:not([hidden]):has-text("up to 3 minutes")');
+    if (signs.length || await p.isVisible('#home-composer .vpreview')) throw new Error('rejected files must not start an upload');
+    step('client-side limits: non-video and 3:05 clip refused before upload (no signing request)');
+
+    // cancel an upload in progress
+    await p.setInputFiles('#home-composer input[name=video]', horiz);
+    await p.waitForSelector('#home-composer .vpreview[data-state=uploading] .vprog');
+    await p.click('#home-composer .vcancel');
+    await p.waitForSelector('#home-composer .vpreview', { state: 'hidden' });
+    if (!(await p.isDisabled('#home-composer button[type=submit]'))) throw new Error('Post should be disabled after cancelling');
+    step('upload can be cancelled');
+
+    const nChunks = mock.calls.chunks.length;
+    await p.setInputFiles('#home-composer input[name=video]', vert);
+    await p.waitForSelector('#home-composer .vpreview:not([hidden]) video');
+    await p.waitForSelector('#home-composer .vprog', { state: 'visible' });
+    if (!(await p.isDisabled('#home-composer button[type=submit]'))) throw new Error('Post must wait for the upload');
+    if (await p.textContent('#home-composer .vpreview .vdur') !== '0:03') throw new Error('preview should show the duration 0:03');
+    if (!(await p.isChecked('#home-composer input[name=is_reel]'))) throw new Error('vertical ≤ 90 s clip should auto-suggest Post as Reel');
+    await p.fill('#home-composer textarea', 'My first reel 🎬 #reels');
+    await p.waitForFunction(() => { const b = document.querySelector('#home-composer .vprog-bar'); const w = parseFloat(b.style.width); return w > 0 && w < 100; }, null, { timeout: 8000 });
+    const pct = await p.textContent('#home-composer .vprog-txt');
+    await p.screenshot({ path: OUT + '/22-composer-video.png', clip: { x: 340, y: 0, width: 640, height: 720 } });
+    await p.waitForSelector('#home-composer .vpreview[data-state=done]', { timeout: 15000 });
+    const ch = mock.calls.chunks.slice(nChunks);
+    if (ch.length !== 3 || new Set(ch.map(c => c.id)).size !== 1 || ch[2].range !== `bytes ${2 * chunk}-${vSize - 1}/${vSize}`) throw new Error('expected a 3-chunk upload with one X-Unique-Upload-Id: ' + JSON.stringify(ch));
+    step(`vertical clip: preview + 0:03 + progress bar ("${pct}"), chunked upload (3 × Content-Range, one upload id), Reel auto-suggested (screenshot 22-composer-video.png)`);
+    await p.click('#home-composer button[type=submit]');
+    const reelSel = '#feed .post:has-text("My first reel") .vmedia video';
+    await p.waitForSelector(reelSel);
+    await p.waitForSelector('#toast:has-text("reel")');
+    const attrs = await p.$eval(reelSel, (v) => ({ poster: v.getAttribute('poster'), preload: v.getAttribute('preload'), inline: v.hasAttribute('playsinline'), muted: v.muted, loop: v.loop, sources: [...v.querySelectorAll('source')].map(s => s.src) }));
+    if (!/so_1.*\.jpg$/.test(attrs.poster) || attrs.preload !== 'metadata' || !attrs.inline || !attrs.muted || !attrs.loop) throw new Error('feed player attributes wrong: ' + JSON.stringify(attrs));
+    if (attrs.sources.length !== 2 || !/f_auto/.test(attrs.sources[0]) || !/vc_h264.*\.mp4$/.test(attrs.sources[1])) throw new Error('player sources wrong: ' + attrs.sources);
+    if ((await p.textContent('#feed .post:has-text("My first reel") .vdur-badge')).trim() !== '0:03') throw new Error('duration badge missing');
+    if (!(await p.isVisible('#feed .post:has-text("My first reel") .vreel'))) throw new Error('reel badge missing');
+    await p.waitForFunction(() => { const v = document.querySelector('#feed .vmedia video'); return v && v.poster; });
+    if (!mock.calls.delivery.some(d => d.ext === 'jpg')) throw new Error('poster image was never requested');
+    await playing(p, reelSel);
+    if (!(await p.$eval(reelSel, v => v.muted))) throw new Error('autoplay must be muted');
+    step('posted as a Reel: feed shows the inline player (poster, preload=metadata, playsinline, f_auto + mp4 sources, 0:03 badge) and autoplays muted');
+
+    // horizontal clip: normal video post (no Reel suggestion)
+    await p.setInputFiles('#home-composer input[name=video]', horiz);
+    await p.waitForSelector('#home-composer .vpreview[data-state=done]', { timeout: 15000 });
+    if (await p.isChecked('#home-composer input[name=is_reel]')) throw new Error('horizontal clip should not be suggested as a Reel');
+    await p.fill('#home-composer textarea', 'Sunset timelapse, landscape');
+    await p.click('#home-composer button[type=submit]');
+    await p.waitForSelector('#feed .post:has-text("Sunset timelapse") .vmedia video');
+    if (await p.isVisible('#feed .post:has-text("Sunset timelapse") .vreel')) throw new Error('normal video should not have the Reels badge');
+    step('horizontal clip posted as a normal video (Reel not suggested)');
+
+    // one at a time, tap-to-unmute, pause when scrolled away
+    await p.goto(B + '/explore'); await p.waitForSelector('#feed .vmedia video');
+    const first = '#feed .post:has-text("Sunset timelapse") .vmedia video';
+    await playing(p, first);
+    const nPlaying = await p.evaluate(() => [...document.querySelectorAll('video')].filter(v => !v.paused).length);
+    if (nPlaying !== 1) throw new Error('only one video should play at a time, got ' + nPlaying);
+    await p.click('#feed .post:has-text("Sunset timelapse") .vmute');
+    if (await p.$eval(first, v => v.muted)) throw new Error('tap-to-unmute did not unmute');
+    await p.click('#feed .post:has-text("Sunset timelapse") .vmute');
+    if (!(await p.$eval(first, v => v.muted))) throw new Error('mute icon did not mute again');
+    step('only one video plays at a time; mute icon toggles sound');
+    await p.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await p.waitForFunction(() => [...document.querySelectorAll('#feed video')].every(v => v.paused), null, { timeout: 8000 });
+    await p.evaluate(() => window.scrollTo(0, 0));
+    await playing(p, first);
+    step('videos pause when scrolled out of view and resume when ≥60% visible again');
+    await p.click(first); await paused(p, first);
+    await p.waitForSelector('#feed .post:has-text("Sunset timelapse") .vmedia.paused .vpaused', { state: 'visible' });
+    await p.click(first); await playing(p, first);
+    step('tap the video to pause / resume');
+
+    // AI panel on a video post knows it's a video
+    await p.click('#feed .post:has-text("My first reel") .ai-btn');
+    await p.waitForSelector('#ai-root .ai-vid:has-text("Reel")');
+    await p.keyboard.press('Escape');
+    step('Ask ZuZu AI on a video post: panel shows the caption + "Reel · 0:03 (reads the caption, not the video)"');
+
+    // screenshot 20: home feed with both video posts
+    await p.goto(B + '/home'); await p.waitForSelector('#feed .vmedia video');
+    await playing(p, '#feed .vmedia video');
+    await p.waitForTimeout(700);
+    await p.screenshot({ path: OUT + '/20-video-feed.png' });
+    step('screenshot 20-video-feed.png');
+
+    // ---------- more reels (direct upload through the API, like the browser does) ----------
+    const reelIds = [+(await p.getAttribute('#feed .post:has-text("My first reel")', 'data-post'))];
+    const apiReel = async (ctx, file, text) => {
+      const s = await (await ctx.request.post(B + '/api/video/sign')).json();
+      const f = new FormData(); for (const [k, v] of Object.entries(s.params)) f.append(k, String(v));
+      f.append('file', new Blob([fs.readFileSync(file)], { type: 'video/mp4' }), 'clip.mp4');
+      const up = await (await fetch(s.uploadUrl, { method: 'POST', body: f })).json();
+      const r = await ctx.request.post(B + '/api/posts', { data: { text, video: { public_id: up.public_id }, is_reel: true } });
+      if (!r.ok()) throw new Error('reel post failed ' + r.status());
+      return (await r.json()).post.id;
+    };
+    const Bu = await newUser(B, 'vidb');
+    reelIds.push(await apiReel(Bu.ctx, vert2, 'Second reel from B #dance'));
+    reelIds.push(await apiReel(A.ctx, vert2, 'Third reel, newest'));
+
+    // ---------- Reels page (desktop): centred 9:16 column, snap feed, overlay, swipe, tap to pause ----------
+    await p.click('.nav a[href="/reels"]');
+    await p.waitForSelector('.reel.active');
+    const layout = await p.evaluate(() => {
+      const r = document.querySelector('#reels'), cs = getComputedStyle(r), b = r.getBoundingClientRect(), reel = document.querySelector('.reel').getBoundingClientRect();
+      return { snap: cs.scrollSnapType, align: getComputedStyle(document.querySelector('.reel')).scrollSnapAlign, w: b.width, h: b.height, cx: b.left + b.width / 2, vw: innerWidth, rh: reel.height, side: !!document.querySelector('aside.side') };
+    });
+    if (!/y/.test(layout.snap) || !/mandatory/.test(layout.snap) || !/start/.test(layout.align)) throw new Error('reels need scroll-snap y mandatory: ' + JSON.stringify(layout));
+    if (Math.abs(layout.w / layout.h - 9 / 16) > 0.02 || Math.abs(layout.rh - layout.h) > 1 || layout.side) throw new Error('desktop reels should be one 9:16 reel per screen: ' + JSON.stringify(layout));
+    const activeId = () => p.evaluate(() => +document.querySelector('.reel.active').dataset.reel);
+    if (await activeId() !== reelIds[2]) throw new Error('newest reel should be first');
+    const act = '.reel.active';
+    for (const b of ['like', 'comment', 'share', 'ai', 'mute']) if (!(await p.isVisible(`${act} .reel-act.${b}`))) throw new Error('reel overlay button missing: ' + b);
+    if (!(await p.textContent(`${act} .reel-info`)).includes('@vida' + rnd)) throw new Error('author handle missing at the bottom');
+    await playing(p, `${act} video`);
+    if (await p.$eval(`${act} video`, v => v.muted)) throw new Error('after a user gesture (nav click), reels should play with sound');
+    if (new URL(p.url()).pathname !== '/reels/' + reelIds[2]) throw new Error('URL should become the shareable /reels/:id');
+    const preload = await p.$eval('.reel.active + .reel video', v => v.preload);
+    if (preload !== 'auto') throw new Error('next reel should be preloaded, got ' + preload);
+    if (await p.evaluate(() => { const m = document.getElementById('momo'); return !!m && !m.hidden; })) throw new Error('Momo must be hidden on /reels');
+    step('Reels (desktop): centred 9:16 column, scroll-snap y mandatory, like/comment/share/AI/mute + @handle overlay, plays with sound after a gesture, next one preloaded, URL /reels/:id, no Momo');
+    // like from the overlay
+    await p.click(`${act} .reel-act.like`);
+    await p.waitForSelector(`${act} .reel-act.like.on`);
+    // swipe (scroll) to the next reel
+    const prevSel = `.reel[data-reel="${reelIds[2]}"] video`;
+    await p.$eval('#reels', (r) => r.scrollBy({ top: r.clientHeight }));
+    await p.waitForFunction((id) => +document.querySelector('.reel.active').dataset.reel === id, reelIds[1], { timeout: 8000 });
+    await playing(p, `.reel[data-reel="${reelIds[1]}"] video`);
+    await paused(p, prevSel);
+    if (new URL(p.url()).pathname !== '/reels/' + reelIds[1]) throw new Error('URL should follow the active reel');
+    step('swiping (scrolling the snap container) moves to the next reel: it plays, the previous one pauses');
+    await p.keyboard.press('ArrowDown');
+    await p.waitForFunction((id) => +document.querySelector('.reel.active').dataset.reel === id, reelIds[0], { timeout: 8000 });
+    await playing(p, `.reel[data-reel="${reelIds[0]}"] video`);
+    step('ArrowDown goes to the next reel too');
+    // tap to pause / resume, mute toggle
+    await p.click(`${act} .reel-tap`, { position: { x: 120, y: 200 } });
+    await paused(p, `${act} video`);
+    await p.waitForSelector(`${act}.paused .reel-paused`, { state: 'visible' });
+    await p.click(`${act} .reel-tap`, { position: { x: 120, y: 200 } });
+    await playing(p, `${act} video`);
+    await p.click(`${act} .reel-act.mute`);
+    if (!(await p.$eval(`${act} video`, v => v.muted))) throw new Error('mute toggle did not mute');
+    step('tap to pause / resume; mute toggle');
+    // share copies /reels/:id; AI opens on the reel; comment opens the thread
+    await p.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: B });
+    await p.evaluate(() => { try { delete navigator.share; } catch {} Object.defineProperty(navigator, 'share', { value: undefined, configurable: true }); });
+    await p.click(`${act} .reel-act.share`);
+    await p.waitForSelector('#toast:not([hidden]):has-text("Link copied")');
+    const copied = await p.evaluate(() => navigator.clipboard.readText());
+    if (copied !== B + '/reels/' + reelIds[0]) throw new Error('share should copy the /reels/:id link, got ' + copied);
+    await p.click(`${act} .reel-act.ai`);
+    await p.waitForSelector('#ai-root .ai-vid:has-text("Reel")');
+    await p.keyboard.press('Escape');
+    await p.click(`${act} .reel-act.comment`);
+    await p.waitForURL('**/post/' + reelIds[0]);
+    await p.waitForSelector('.focus .vmedia video');
+    step('share copies the /reels/:id link; AI sparkle opens ZuZu AI; comment opens the thread (with the player)');
+    // shareable link straight to a reel
+    await p.goto(B + '/reels/' + reelIds[1]);
+    await p.waitForSelector('.reel.active');
+    if (await activeId() !== reelIds[1] || await p.evaluate(() => +document.querySelector('.reel').dataset.reel) !== reelIds[1]) throw new Error('/reels/:id should open that reel first');
+    if (!(await p.$(`.reel[data-reel="${reelIds[0]}"]`))) throw new Error('/reels/:id should continue with older reels below');
+    step('/reels/:id opens that reel first, older reels follow');
+    // A shared link opened cold (no user gesture yet; headless Chrome always reports one, so emulate a fresh visit).
+    const cold = await A.ctx.newPage(); watch(cold);
+    await cold.addInitScript(() => Object.defineProperty(Navigator.prototype, 'userActivation', { get: () => ({ hasBeenActive: false, isActive: false }) }));
+    await cold.goto(B + '/reels/' + reelIds[1]); await cold.waitForSelector('.reel.active');
+    await playing(cold, `${act} video`);
+    if (!(await cold.$eval(`${act} video`, v => v.muted))) throw new Error('opened from a link (no gesture yet): reel should autoplay muted');
+    await cold.click(`${act} .reel-tap`, { position: { x: 120, y: 200 } });
+    await playing(cold, `${act} video`);
+    if (await cold.$eval(`${act} video`, v => v.muted)) throw new Error('first tap should turn the sound on (and keep playing)');
+    await cold.click(`${act} .reel-tap`, { position: { x: 120, y: 200 } });
+    await paused(cold, `${act} video`);
+    await cold.close();
+    step('opened cold from a shared link: autoplays muted; the first tap turns the sound on without pausing, the next tap pauses');
+
+    // ---------- profile Reels tab ----------
+    await p.goto(B + '/u/vida' + rnd + '/reels');
+    await p.waitForSelector('.reel-grid .reel-tile img');
+    const tiles = await p.$$eval('.reel-tile', (t) => t.map(x => +x.dataset.reelTile));
+    if (tiles.length !== 2 || !tiles.includes(reelIds[0]) || !tiles.includes(reelIds[2])) throw new Error('profile Reels grid wrong: ' + tiles);
+    await imgLoaded(p, '.reel-tile img');
+    if (!(await p.isVisible('.tabs a.tab.active:has-text("Reels")'))) throw new Error('Reels tab not active');
+    await p.click(`.reel-tile[data-reel-tile="${reelIds[0]}"]`);
+    await p.waitForURL('**/reels/' + reelIds[0]);
+    await p.waitForSelector('.reel.active');
+    step('profile Reels tab: grid of posters; a tile opens /reels/:id');
+
+    // ---------- mobile ----------
+    const m = await browser.newContext({ ...mobile, storageState: await A.ctx.storageState() }); contexts.push(m);
+    const mp = await m.newPage(); watch(mp);
+    await mp.goto(B + '/home'); await mp.waitForSelector('#home-composer');
+    if (!(await mp.isVisible('#home-composer .tool-record'))) throw new Error('record button should show on touch devices');
+    if (await mp.getAttribute('#home-composer input[name=video_capture]', 'capture') !== 'environment') throw new Error('record input needs capture');
+    if (!(await mp.isVisible('.bottom-nav a[href="/reels"]'))) throw new Error('Reels missing from the mobile bottom bar');
+    await mp.tap('.bottom-nav a[href="/reels"]');
+    await mp.waitForSelector('.reel.active');
+    await playing(mp, '.reel.active video');
+    const ml = await mp.evaluate(() => { const r = document.querySelector('#reels').getBoundingClientRect(); return { w: r.width, h: r.height, top: r.top, nav: document.querySelector('.bottom-nav').getBoundingClientRect().top, mt: getComputedStyle(document.querySelector('.mobile-top')).display }; });
+    if (ml.w !== 390 || Math.abs(ml.top) > 1 || Math.abs(ml.top + ml.h - ml.nav) > 1 || ml.mt !== 'none') throw new Error('mobile reels should fill the screen above the tab bar: ' + JSON.stringify(ml));
+    for (const b of ['like', 'comment', 'share', 'ai', 'mute']) if (!(await mp.isVisible(`.reel.active .reel-act.${b}`))) throw new Error('mobile overlay button missing: ' + b);
+    await mp.waitForTimeout(600);
+    await mp.screenshot({ path: OUT + '/21-reels-mobile.png' });
+    const mFirst = await mp.evaluate(() => +document.querySelector('.reel.active').dataset.reel);
+    await mp.$eval('#reels', (r) => r.scrollBy({ top: r.clientHeight }));
+    await mp.waitForFunction((id) => +document.querySelector('.reel.active').dataset.reel !== id, mFirst, { timeout: 8000 });
+    await playing(mp, '.reel.active video');
+    step('mobile: Reels in the bottom bar, full-screen snap feed above the tab bar, overlay buttons, swipe to next (screenshot 21-reels-mobile.png)');
+
+    // ---------- video UI hidden when Cloudinary isn't configured ----------
+    const O = await newUser(off.url, 'vidoff');
+    const op = O.page;
+    await op.goto(off.url + '/home'); await op.waitForSelector('#home-composer');
+    if (await op.$('#home-composer .tool-video, #home-composer .tool-record, #home-composer .vpreview, .nav a[href="/reels"]')) throw new Error('video UI should be hidden when video:false');
+    await op.goto(off.url + '/u/vidoff' + rnd); await op.waitForSelector('.pf');
+    if (await op.$('.tabs a:has-text("Reels")')) throw new Error('profile Reels tab should be hidden when video:false');
+    await op.goto(off.url + '/reels'); await op.waitForURL('**/home');
+    const om = await browser.newContext({ ...mobile, storageState: await O.ctx.storageState() }); contexts.push(om);
+    const omp = await om.newPage(); watch(omp);
+    await omp.goto(off.url + '/home'); await omp.waitForSelector('.bottom-nav');
+    if (await omp.$('.bottom-nav a[href="/reels"]')) throw new Error('mobile Reels tab should be hidden when video:false');
+    step('CLOUDINARY_URL unset: no video/record buttons, no Reels nav (desktop + mobile), no profile Reels tab, /reels -> /home');
+
+    const n = mock.calls.destroy.length;
+    if (await tidy() < 4) throw new Error('expected 4 video posts to delete');
+    for (let i = 0; i < 40 && mock.calls.destroy.length - n < 4; i++) await new Promise(r => setTimeout(r, 100));
+    if (mock.calls.destroy.length - n < 4) throw new Error('deleting video posts should destroy their Cloudinary assets');
+    step('deleted video posts -> Cloudinary destroy called for each');
+  } finally {
+    await tidy().catch(() => {}); // never leave this run's video posts in the local DB (their assets only exist in the mock)
+    for (const c of contexts) await c.close().catch(() => {});
+    on.child.kill(); off.child.kill(); await mock.close(); groq.srv.close(); cleanup();
     await clearMockThoughts().catch(() => {});
   }
 }

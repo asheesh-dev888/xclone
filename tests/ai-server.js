@@ -74,6 +74,8 @@ async function startApp({ port, ai = null, env: extra = {} }) {
   const env = { ...process.env, DATABASE_URL: localDbUrl(), PORT: String(port), ...extra };
   delete env.GROQ_API_KEY; delete env.GROQ_BASE_URL; delete env.GROQ_MODEL;
   delete env.GOOGLE_CLIENT_ID; delete env.GOOGLE_CLIENT_SECRET;
+  delete env.CLOUDINARY_URL; delete env.CLOUDINARY_API_BASE; delete env.CLOUDINARY_DELIVERY_BASE; // video: only when a test passes the mock's env
+  Object.assign(env, extra);
   if (ai) { env.GROQ_API_KEY = MOCK_KEY; env.GROQ_BASE_URL = ai.baseUrl; if (ai.model) env.GROQ_MODEL = ai.model; }
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';

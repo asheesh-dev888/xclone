@@ -9,3 +9,5 @@ services:
     envVars:
       - key: DATABASE_URL   # Neon connection string; set in the Render dashboard (not committed)
         sync: false
+      - key: CLOUDINARY_URL # cloudinary://<key>:<secret>@<cloud>; enables video posts + Reels (set in the dashboard)
+        sync: false

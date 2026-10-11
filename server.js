@@ -11,6 +11,7 @@ const ai = require('./ai');
 const admin = require('./admin');
 const ideals = require('./ideals');
 const monkey = require('./monkey');
+const video = require('./video');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -114,7 +115,7 @@ app.get('/api/me', h(async (req, res) => {
 }));
 
 // ---------- Continue with Google (OAuth 2.0 authorization code flow) ----------
-app.get('/api/config', (req, res) => res.json({ google: google.enabled(), ai: ai.enabled() }));
+app.get('/api/config', (req, res) => res.json({ google: google.enabled(), ai: ai.enabled(), video: video.enabled() }));
 
 const G_COOKIE = 'g_oauth';
 const gCookieOpts = (req) => ({ httpOnly: true, sameSite: 'lax', secure: google.redirectUri(req).startsWith('https:'), path: '/auth/google' });
@@ -215,12 +216,13 @@ SELECT p.id, p.text, p.image, p.parent_id, p.created_at, p.user_id,
   (SELECT COUNT(*)::int FROM posts r WHERE r.repost_of=p.id) repost_count,
   EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=@me) liked,
   EXISTS(SELECT 1 FROM posts r WHERE r.repost_of=p.id AND r.user_id=@me) reposted,
-  (SELECT pu.username FROM posts pp JOIN users pu ON pu.id=pp.user_id WHERE pp.id=p.parent_id) reply_to
-FROM posts p JOIN users u ON u.id=p.user_id`;
+  (SELECT pu.username FROM posts pp JOIN users pu ON pu.id=pp.user_id WHERE pp.id=p.parent_id) reply_to,
+  ${video.SELECT_COLS}
+FROM posts p JOIN users u ON u.id=p.user_id ${video.JOIN}`;
 // Author's ideal (for the small coloured dot next to names) replaces the raw ideal_* columns.
 function postOut(r) {
   if (!r) return r;
-  const { ideal_name, ideal_preset_id, ideal_qualities, ...p } = r;
+  const { ideal_name, ideal_preset_id, ideal_qualities, ...p } = video.videoOut(r);
   const i = ideals.idealOut({ ideal_name, ideal_preset_id, ideal_qualities });
   p.ideal = i ? { name: i.name, primary: i.primary, color: i.color } : null;
   return p;
@@ -270,24 +272,40 @@ async function notify(userId, actorId, type, postId, client) {
 }
 
 app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
-  const text = (req.body.text || '').trim();
+  const text = String(req.body.text || '').trim();
   const parentId = req.body.parent_id ? parseInt(req.body.parent_id, 10) : null;
-  if (!text && !req.file) return res.status(400).json({ error: 'Post cannot be empty' });
+  const hasVideo = req.body.video != null && req.body.video !== '';
+  if (!text && !req.file && !hasVideo) return res.status(400).json({ error: 'Post cannot be empty' });
   if ([...text].length > 280) return res.status(400).json({ error: 'Post is over 280 characters' });
+  if (req.file && hasVideo) return res.status(400).json({ error: 'A post can have a photo or a video, not both' });
   let parent = null;
   if (parentId) {
     parent = await db.get('SELECT * FROM posts WHERE id=$1 AND repost_of IS NULL', [parentId]);
     if (!parent) return res.status(404).json({ error: 'Post you are replying to was not found' });
   }
-  const id = await db.tx(async (c) => {
-    const { id } = await db.get('INSERT INTO posts(user_id,text,parent_id,created_at) VALUES ($1,$2,$3,$4) RETURNING id', [req.user.id, text, parentId, now()], c);
-    if (req.file) {
-      const url = await saveMedia(c, req.file, req.user.id, id);
-      await db.run('UPDATE posts SET image=$1 WHERE id=$2', [url, id], c);
-    }
-    if (parent) await notify(parent.user_id, req.user.id, 'reply', id, c);
-    return id;
-  });
+  // Video: checked against Cloudinary's own metadata (our cloud, a video, limits). Reels are top-level posts only.
+  const isReel = hasVideo && !parentId && ['1', 'true', 'on', true].includes(req.body.is_reel);
+  let vid = null;
+  if (hasVideo) {
+    try { vid = await video.verify(req.body.video, { userId: req.user.id, isReel }); }
+    catch (e) { if (e.expose) return res.status(e.status).json({ error: e.message }); throw e; }
+  }
+  let id;
+  try {
+    id = await db.tx(async (c) => {
+      const { id } = await db.get('INSERT INTO posts(user_id,text,parent_id,created_at) VALUES ($1,$2,$3,$4) RETURNING id', [req.user.id, text, parentId, now()], c);
+      if (req.file) {
+        const url = await saveMedia(c, req.file, req.user.id, id);
+        await db.run('UPDATE posts SET image=$1 WHERE id=$2', [url, id], c);
+      }
+      if (vid) await video.insert(db, c, id, vid, isReel);
+      if (parent) await notify(parent.user_id, req.user.id, 'reply', id, c);
+      return id;
+    });
+  } catch (e) {
+    if (e.code === '23505' && vid) return res.status(409).json({ error: 'That video is already posted' });
+    throw e;
+  }
   res.json({ post: await getPost(id, req.user.id) });
 }));
 
@@ -318,7 +336,13 @@ app.delete('/api/posts/:id', auth, h(async (req, res) => {
   const p = await db.get('SELECT * FROM posts WHERE id=$1', [id]);
   if (!p) return res.status(404).json({ error: 'Not found' });
   if (p.user_id !== req.user.id) return res.status(403).json({ error: 'You can only delete your own posts' });
-  await db.run('DELETE FROM posts WHERE id=$1', [p.id]); // cascades to replies, likes, reposts, notifications, media
+  // Cascades to replies, likes, reposts, notifications, media and post_videos; videos are queued for Cloudinary destroy first.
+  const queued = await db.tx(async (c) => {
+    const n = await video.queueForPost(db, c, p.id);
+    await db.run('DELETE FROM posts WHERE id=$1', [p.id], c);
+    return n;
+  });
+  if (queued) video.flushSoon();
   res.json({ ok: true });
 }));
 
@@ -381,7 +405,9 @@ app.get('/api/users/:username/posts', h(async (req, res) => {
   } else if (tab === 'likes') {
     items = keyed(await allPosts(POST_SELECT + ' JOIN likes lk ON lk.post_id=p.id AND lk.user_id=@uid ORDER BY lk.created_at DESC LIMIT 100', { uid: u.id, me }));
   } else if (tab === 'media') {
-    items = keyed(await allPosts(POST_SELECT + ' WHERE p.user_id=@uid AND p.image IS NOT NULL ORDER BY p.created_at DESC LIMIT 100', { uid: u.id, me }));
+    items = keyed(await allPosts(POST_SELECT + ' WHERE p.user_id=@uid AND (p.image IS NOT NULL OR v.post_id IS NOT NULL) ORDER BY p.created_at DESC LIMIT 100', { uid: u.id, me }));
+  } else if (tab === 'reels') {
+    items = keyed(await allPosts(POST_SELECT + ' WHERE p.user_id=@uid AND v.is_reel AND p.parent_id IS NULL ORDER BY p.created_at DESC LIMIT 100', { uid: u.id, me }));
   } else {
     items = await hydrate(await db.all(`${TL} WHERE p.user_id=$1 AND p.parent_id IS NULL ORDER BY p.created_at DESC LIMIT 100`, [u.id]), me);
   }
@@ -642,6 +668,9 @@ app.delete('/api/dm/messages/:id', h(async (req, res) => {
 
 // ---------- ZuZu AI (Ask about a post; Groq, streamed as SSE) ----------
 ai.register(app, { auth, h, db, postIdParam });
+
+// ---------- Video posts + Reels (Cloudinary direct uploads; sign, discard, reels feed) ----------
+video.register(app, { auth, h, db, getPosts });
 
 // ---------- Momo the monkey: short cached thoughts on posts (Groq once per post, local fallback) ----------
 monkey.register(app, { auth, h, db, postIdParam });

@@ -194,9 +194,42 @@ call failed isn't retried for 10 minutes. If AI is off (no `GROQ_API_KEY`), Groq
 post has no text, or the user hit the limit (30 Groq-backed thoughts per user per 10 minutes, in memory per instance;
 `MONKEY_RATE_MAX` to override), a local fallback line is returned: ~30 cute English lines plus Hindi and Hinglish ones,
 picked by post id so it's stable. The client caches thoughts per post id (memory + `sessionStorage`) and never refetches
-while Momo just sits there. The service worker never caches `/api/monkey` (cache `zuzu-v7`).
+while Momo just sits there. The service worker never caches `/api/monkey`.
 Optional env: `MONKEY_RATE_MAX`, `MONKEY_TIMEOUT_MS`, `MONKEY_MAX_TOKENS`. `localStorage` `zuzu.momoIdleMs` overrides the
 2-minute sleep timer (tests only).
+
+## Video posts + Reels (Cloudinary)
+Videos never touch Postgres or the Render disk: the browser uploads straight to Cloudinary with a server-signed request,
+and Postgres stores only metadata (`post_videos`: public_id, cloud_name, version, format, duration, width, height, bytes,
+poster, is_reel; added idempotently in `schema.sql`).
+
+- Enable: set `CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@<cloud_name>` (Render dashboard; not committed).
+  Without it `/api/config` returns `video:false`, the video/record buttons, Reels nav and profile Reels tab are hidden
+  and the app starts normally (existing video posts still render).
+- Limits (client + server): 100 MB, mp4/mov/webm/3gp/mkv, posts up to 3 min, Reels up to 90 s. The composer suggests
+  "Post as Reel" for vertical clips of 90 s or less. Files over 20 MB upload in 10 MB chunks (`X-Unique-Upload-Id` +
+  `Content-Range`) with a progress bar and cancel.
+- API: `POST /api/video/sign` (login, 30/hour/user) returns `{cloudName, apiKey, uploadUrl, params, chunkSize,
+  chunkThreshold, limits}`; `params` (timestamp, signature, folder `zuzu`, tags, `context=uid=<user>`, allowed_formats,
+  async eager `c_limit,q_auto,vc_h264,w_720/mp4|c_limit,q_auto,so_1,w_720/jpg`) is posted as-is. SHA-1 signature computed
+  on the server. `POST /api/posts` takes `video` = `{public_id, version, duration, width, height, bytes}` + `is_reel`;
+  the server checks the asset with the Admin API (`GET resources/video/upload/<public_id>`: exists, video, folder,
+  uploader uid, format, size, duration) before saving. 409 if the asset is already used. `POST /api/video/discard`
+  removes an uploaded-but-unposted asset. `GET /api/reels?cursor=&limit=` pages Reels. Deleting a post queues
+  the asset in `video_deletions` and destroys it with the signed destroy API (retried every 15 min, up to 10 attempts).
+- Delivery: `c_limit,f_auto,q_auto,vc_auto,w_720` plus an H.264 mp4 fallback, poster `so_1` jpg; `preload=metadata`.
+- Feed: muted inline player, autoplays when 60% visible, one at a time, pauses out of view, loops clips of 60 s or less,
+  tap to pause, mute button, duration badge. Reels (`/reels`, `/reels/:postId`): full-screen scroll-snap feed (centred
+  9:16 column on desktop), sound on after the first gesture, tap to pause, like/comment/share/ZuZu AI/mute on the right,
+  next reel preloaded, keys ↑/↓/j/k/space/m. Momo is hidden on Reels; ZuZu AI and Momo read the caption only.
+- The service worker (`zuzu-v8`) never caches videos, Cloudinary URLs, Range requests, `/api/video` or `/api/reels`.
+- Optional env: `CLOUDINARY_TIMEOUT_MS`, `VIDEO_SIGN_RATE_MAX`. Tests only: `CLOUDINARY_API_BASE`,
+  `CLOUDINARY_DELIVERY_BASE`, `VIDEO_CHUNK_SIZE`, `VIDEO_CHUNK_THRESHOLD` (tests use the mock in
+  `tests/cloudinary-server.js`, which needs system ffmpeg/ffprobe).
+- Free plan caveats: about 25 monthly credits shared by storage, bandwidth and transformations; large videos (~40 MB+)
+  can't be transformed on the fly, which is why the transforms are generated eagerly (async). The first views of a fresh
+  upload may fall back to the mp4 source while they're processing. Admin API is rate limited (~500 calls/hour), and every
+  video post makes one call. If the tab is closed mid-compose, the uploaded asset stays orphaned in Cloudinary.
 
 ## Local commands
     cd /workspace/xclone
@@ -211,7 +244,9 @@ Optional env: `MONKEY_RATE_MAX`, `MONKEY_TIMEOUT_MS`, `MONKEY_MAX_TOKENS`. `loca
     node tests/ui-test.js     # headless Chrome end-to-end flow (ZuZu AI on :4194/:4195 with the mock;
                               #  writes screenshots 12-ai-desktop.png / 13-ai-mobile.png; admin UI on :4198 -> 14-admin.png;
                               #  ideal picker -> 15-ideal-signup.png / 16-ideal-mobile.png / 17-ideal-profile.png;
-                              #  Momo on :4204 with the mock -> 18-monkey-desktop.png / 19-monkey-mobile.png)
+                              #  Momo on :4204 with the mock -> 18-monkey-desktop.png / 19-monkey-mobile.png;
+                              #  video/Reels on :4224 (mock Cloudinary) / :4225 (off) -> 20-video-feed.png /
+                              #  21-reels-mobile.png / 22-composer-video.png; UI_ONLY=video runs just that part)
                               # (api-test: Momo on :4201 (mock Groq) / :4202 (AI off). Mock thoughts cached in the
                               #  local DB are cleared afterwards. Requests to the main server's /api/monkey are stubbed.)
     node tests/monkey-demo.js # record screenshots/monkey-demo.gif + .mp4 (Momo hopping while scrolling; mock Groq on :4205;
@@ -220,5 +255,5 @@ Optional env: `MONKEY_RATE_MAX`, `MONKEY_TIMEOUT_MS`, `MONKEY_MAX_TOKENS`. `loca
     node tests/shots.js       # regenerate screenshots/ (logs in as demo; opening DMs marks them read)
 
 ## Files
-server.js (API + static), ai.js (ZuZu AI), monkey.js (Momo's thoughts), admin.js (admin dashboard API + /admin access), ideals.js (ideal validation/output), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
+server.js (API + static), video.js (Cloudinary video + Reels), ai.js (ZuZu AI), monkey.js (Momo's thoughts), admin.js (admin dashboard API + /admin access), ideals.js (ideal validation/output), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
 public/{index.html,style.css,app.js,ideals.js,favicon.svg,sw.js,download/ZuZu.apk}, bin/cloudflared, screenshots/.

@@ -37,6 +37,13 @@ const P = {
   logout: 'M16 13v-2H7V8l-5 4 5 4v-3h9zM20 3h-9c-1.103 0-2 .897-2 2v4h2V5h9v14h-9v-4H9v4c0 1.103.897 2 2 2h9c1.103 0 2-.897 2-2V5c0-1.103-.897-2-2-2z',
   chart: 'M8.75 21V3h2v18h-2zM18 21V8.5h2V21h-2zM4 21l.004-10h2L6 21H4zm9.248 0v-7h2v7h-2z',
   check: 'M9 20c-.264 0-.52-.104-.707-.293l-4.785-4.785 1.414-1.414L9 17.586 19.072 7.5l1.414 1.414L9.707 19.707A1 1 0 0 1 9 20z',
+  video: 'M3 6.5C3 5.12 4.12 4 5.5 4h9C15.88 4 17 5.12 17 6.5v1.38l3.55-2.13A1 1 0 0 1 22 6.6v10.8a1 1 0 0 1-1.45.85L17 16.12v1.38c0 1.38-1.12 2.5-2.5 2.5h-9C4.12 20 3 18.88 3 17.5v-11zM5.5 6c-.28 0-.5.22-.5.5v11c0 .28.22.5.5.5h9c.28 0 .5-.22.5-.5v-11c0-.28-.22-.5-.5-.5h-9zM17 10.2v3.6l3 1.8V8.4l-3 1.8z',
+  record: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z',
+  reels: 'M5.5 3h13C19.88 3 21 4.12 21 5.5v13c0 1.38-1.12 2.5-2.5 2.5h-13C4.12 21 3 19.88 3 18.5v-13C3 4.12 4.12 3 5.5 3zM5 9v9.5c0 .28.22.5.5.5h13c.28 0 .5-.22.5-.5V9H5zm0-2h2.6l2-2H5.5c-.28 0-.5.22-.5.5V7zm5.4 0h3.2l2-2h-3.2l-2 2zm6 0H19V5.5c0-.28-.22-.5-.5-.5h-.1l-2 2zM10 10.8l5.2 3.2-5.2 3.2v-6.4z',
+  reelsFill: 'M5.5 3h1.9l-4 4H3V5.5C3 4.12 4.12 3 5.5 3zm4.7 0h3.2l-4 4H6.2l4-4zm6 0h2.3C19.88 3 21 4.12 21 5.5V7h-8.8l4-4zM3 9h18v9.5c0 1.38-1.12 2.5-2.5 2.5h-13C4.12 21 3 19.88 3 18.5V9zm7 1.8v6.4l5.2-3.2-5.2-3.2z',
+  volOn: 'M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM3 9v6h4l5 5V4L7 9H3z',
+  volOff: 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z',
+  play: 'M8 5.14v13.72a1 1 0 0 0 1.52.85l10.6-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z',
   sparkle: 'M10 2.5l1.95 5.55L17.5 10l-5.55 1.95L10 17.5l-1.95-5.55L2.5 10l5.55-1.95L10 2.5zm0 4.6l-.85 2.05L7.1 10l2.05.85L10 12.9l.85-2.05L12.9 10l-2.05-.85L10 7.1zM18.5 14l.95 2.55L22 17.5l-2.55.95L18.5 21l-.95-2.55L15 17.5l2.55-.95L18.5 14z',
 };
 const ic = (name, cls = 'icon') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true"><path d="${P[name]}"/></svg>`;
@@ -83,7 +90,7 @@ function appBanner() {
 }
 
 // ---------- state & api ----------
-const state = { me: null, unread: 0, dmUnread: 0, chat: null, convs: [], homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false, ai: false } };
+const state = { me: null, unread: 0, dmUnread: 0, chat: null, convs: [], homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false, ai: false, video: false } };
 async function api(method, url, body) {
   const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body instanceof FormData) opts.body = body;
@@ -138,9 +145,10 @@ const routes = [
   [/^\/messages(?:\/(\d+))?$/, (m) => viewMessages(m[1] ? +m[1] : null)],
   [/^\/search$/, () => viewSearch()],
   [/^\/admin\/?$/, () => viewAdmin()],
+  [/^\/reels(?:\/(\d+))?\/?$/, (m) => viewReels(m[1] ? +m[1] : null)],
   [/^\/post\/(\d+)$/, (m) => viewPost(m[1])],
   [/^\/u\/([\w.]+)\/(followers|following)$/, (m) => viewFollowList(m[1], m[2])],
-  [/^\/u\/([\w.]+)(?:\/(replies|media|likes))?$/, (m) => viewProfile(m[1], m[2] || 'posts')],
+  [/^\/u\/([\w.]+)(?:\/(replies|media|reels|likes))?$/, (m) => viewProfile(m[1], m[2] || 'posts')],
 ];
 const PUBLIC = ['/login', '/signup'];
 function go(url, replace) {
@@ -148,7 +156,8 @@ function go(url, replace) {
   render();
 }
 async function render() {
-  closeMenus(); closeAi();
+  closeMenus(); closeAi(); reelsTeardown();
+  $$('#app form[data-form="compose"]').forEach(f => clearComposerVideo(f)); // leaving the page drops an unposted upload
   const p = location.pathname;
   if (!state.me && !PUBLIC.includes(p)) return go('/login', true);
   if (state.me && PUBLIC.includes(p)) return go('/home', true);
@@ -171,6 +180,7 @@ function shell(center, { active = '', layout = '' } = {}) {
   if (layout !== 'dm') state.chat = null;
   document.body.classList.toggle('dm-page', layout === 'dm');
   document.body.classList.toggle('admin-page', layout === 'admin');
+  document.body.classList.toggle('reels-page', layout === 'reels');
   document.body.classList.remove('dm-chat-open');
   const badge = (key) => key === 'notifications' && state.unread ? `<span class="badge">${state.unread > 99 ? '99+' : state.unread}</span>` : key === 'messages' ? dmBadge() : '';
   const navItem = (href, key, icon, iconOn, label) => `<a class="nav-item ${active === key ? 'active' : ''}" href="${href}" data-link>${ic(active === key && iconOn ? iconOn : icon)}${badge(key)}<span class="lbl">${label}</span></a>`;
@@ -180,6 +190,7 @@ function shell(center, { active = '', layout = '' } = {}) {
       <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}<span class="wordmark">ZuZu</span></a>
       ${navItem('/home', 'home', 'home', 'homeFill', 'Home')}
       ${navItem('/explore', 'explore', 'search', null, 'Explore')}
+      ${state.config.video ? navItem('/reels', 'reels', 'reels', 'reelsFill', 'Reels') : ''}
       ${navItem('/notifications', 'notifications', 'bell', null, 'Notifications')}
       ${navItem('/messages', 'messages', 'mail', 'mailFill', 'Messages')}
       ${navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
@@ -189,7 +200,7 @@ function shell(center, { active = '', layout = '' } = {}) {
       <button class="btn btn-primary btn-big" data-action="compose">${ic('feather')}<span class="lbl">Post</span></button>
       <div class="me-chip" data-action="me-menu">${avatar(me)}<div class="who"><div style="font-weight:700">${esc(me.name)}</div><div style="color:var(--muted)">@${esc(me.username)}</div></div><span class="dots">${ic('dots')}</span></div>
     </header>
-    <main class="main ${layout === 'dm' ? 'dm-main' : layout === 'admin' ? 'admin-main' : ''}">
+    <main class="main ${layout === 'dm' ? 'dm-main' : layout === 'admin' ? 'admin-main' : layout === 'reels' ? 'reels-main' : ''}">
       <div class="mobile-top">
         <a href="/u/${esc(me.username)}" data-link>${avatar(me, 'sm')}</a>
         <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}</a>
@@ -198,7 +209,7 @@ function shell(center, { active = '', layout = '' } = {}) {
       </div>
       <div id="center">${center}</div>
     </main>
-    ${layout === 'dm' || layout === 'admin' ? '' : `<aside class="side">
+    ${layout === 'dm' || layout === 'admin' || layout === 'reels' ? '' : `<aside class="side">
       <div class="searchbox"><form class="search" data-form="search">${ic('search')}<input name="q" placeholder="Search" autocomplete="off" value="${esc(new URLSearchParams(location.search).get('q') || '')}"></form></div>
       ${sideAppCard()}
       <div class="card" id="trends"><h2>What’s happening</h2>${loader()}</div>
@@ -210,6 +221,7 @@ function shell(center, { active = '', layout = '' } = {}) {
   <nav class="bottom-nav">
     <a href="/home" data-link>${ic(active === 'home' ? 'homeFill' : 'home')}</a>
     <a href="/explore" data-link>${ic('search')}</a>
+    ${state.config.video ? `<a href="/reels" data-link aria-label="Reels" class="bn-reels">${ic(active === 'reels' ? 'reelsFill' : 'reels')}</a>` : ''}
     <a href="/notifications" data-link aria-label="Notifications">${ic('bell')}${state.unread ? `<span class="badge">${state.unread}</span>` : ''}</a>
     <a href="/messages" data-link aria-label="Messages">${ic(active === 'messages' ? 'mailFill' : 'mail')}${dmBadge()}</a>
     <a href="/u/${esc(me.username)}" data-link>${ic(active === 'profile' ? 'userFill' : 'user')}</a>
@@ -248,6 +260,7 @@ function postHTML(p, { thread = false } = {}) {
       ${p.reply_to ? `<div class="replying">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
       ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
       ${p.image ? `<div class="media"><img src="${esc(p.image)}" loading="lazy" alt=""></div>` : ''}
+      ${p.video ? videoHTML(p) : ''}
       ${actionsHTML(p)}
     </div>
   </article>`;
@@ -270,6 +283,7 @@ function remember(list) { list.forEach(p => postCache.set(p.id, p)); return list
 function updatePostEverywhere(p) {
   const old = postCache.get(p.id) || {};
   postCache.set(p.id, { ...old, ...p });
+  $$(`[data-reel-side="${p.id}"]`).forEach(el => { el.outerHTML = reelSideHTML(postCache.get(p.id)); });
   $$(`[data-actions="${p.id}"]`).forEach(el => {
     const wasFocus = el.closest('.focus');
     el.outerHTML = actionsHTML(p);
@@ -285,8 +299,11 @@ function composerHTML({ id, placeholder = 'What is happening?!', parentId = '', 
     <div class="body">
       <textarea name="text" rows="1" placeholder="${esc(placeholder)}" ${autofocus ? 'autofocus' : ''}></textarea>
       <div class="preview" hidden><img alt=""><button type="button" class="x" data-action="clear-image" aria-label="Remove image">${ic('close', 'icon')}</button></div>
+      ${state.config.video ? videoPreviewHTML(!parentId) : ''}
       <div class="tools">
-        <label class="tool" title="Add photo">${ic('image')}<input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label>
+        <div class="tool-row"><label class="tool" title="Add photo">${ic('image')}<input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label>
+        ${state.config.video ? `<label class="tool tool-video" title="Add video" aria-label="Add video">${ic('video')}<input type="file" name="video" accept="video/*,.mkv,.3gp,.mov" hidden></label>
+        <label class="tool tool-record" title="Record a video" aria-label="Record a video">${ic('record')}<input type="file" name="video_capture" accept="video/*" capture="environment" hidden></label>` : ''}</div>
         <div class="right"><span class="counter"></span><button class="btn btn-primary" type="submit" disabled>${buttonLabel}</button></div>
       </div>
     </div>
@@ -300,12 +317,14 @@ function ring(len) {
 function updateComposer(form) {
   const ta = form.text, len = [...ta.value].length;
   const hasImg = form.image.files.length > 0;
+  const vs = composerVideo.get(form);
+  const vidReady = !!(vs && vs.result), vidBusy = !!(vs && !vs.result);
   ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px';
   const cnt = $('.counter', form);
   const left = MAX - len;
   cnt.className = 'counter' + (left < 0 ? ' over' : left <= 20 ? ' warn' : '');
   cnt.innerHTML = len ? `${left <= 20 ? `<span>${left}</span>` : ''}${ring(len)}` : '';
-  $('button[type=submit]', form).disabled = (!ta.value.trim() && !hasImg) || len > MAX;
+  $('button[type=submit]', form).disabled = (!ta.value.trim() && !hasImg && !vidReady) || len > MAX || vidBusy;
 }
 document.addEventListener('input', (e) => { const f = e.target.closest('form[data-form="compose"]'); if (f) updateComposer(f); });
 document.addEventListener('change', (e) => {
@@ -314,9 +333,13 @@ document.addEventListener('change', (e) => {
     const file = e.target.files[0], pv = $('.preview', f);
     if (file) {
       if (file.size > 5 * 1024 * 1024) { toast('Image must be under 5 MB'); e.target.value = ''; }
-      else { $('img', pv).src = URL.createObjectURL(file); pv.hidden = false; }
+      else { clearComposerVideo(f); $('img', pv).src = URL.createObjectURL(file); pv.hidden = false; }
     }
     updateComposer(f);
+  }
+  if (f && (e.target.name === 'video' || e.target.name === 'video_capture')) {
+    const file = e.target.files[0]; e.target.value = '';
+    if (file) pickComposerVideo(f, file);
   }
   if (e.target.matches('[data-preview]')) {
     const file = e.target.files[0]; if (!file) return;
@@ -344,13 +367,19 @@ document.addEventListener('submit', async (e) => {
     fd.append('text', f.text.value);
     if (f.image.files[0]) fd.append('image', f.image.files[0]);
     if (f.dataset.parent) fd.append('parent_id', f.dataset.parent);
+    const vs = composerVideo.get(f);
+    if (vs && vs.result) {
+      const r = vs.result;
+      fd.append('video', JSON.stringify({ public_id: r.public_id, version: r.version, duration: r.duration || vs.meta.duration, width: r.width, height: r.height, bytes: r.bytes, cloud_name: vs.cloudName }));
+      if (!f.dataset.parent && f.is_reel && f.is_reel.checked) fd.append('is_reel', '1');
+    }
     try {
       const { post } = await api('POST', '/api/posts', fd);
       remember([post]);
-      f.reset(); $('.preview', f).hidden = true; updateComposer(f);
+      f.reset(); $('.preview', f).hidden = true; clearComposerVideo(f, { posted: true }); updateComposer(f);
       const inModal = f.closest('.modal');
       if (inModal) closeModal();
-      toast(f.dataset.parent ? 'Your reply was sent.' : 'Your post was sent.');
+      toast(f.dataset.parent ? 'Your reply was sent.' : post.video && post.video.is_reel ? 'Your reel was posted.' : 'Your post was sent.');
       if (f.dataset.parent) {
         if (location.pathname === '/post/' + f.dataset.parent) { const list = $('#replies'); if (list) list.insertAdjacentHTML('beforeend', postHTML(post)); }
         const parent = postCache.get(+f.dataset.parent);
@@ -454,6 +483,9 @@ document.addEventListener('click', async (e) => {
       el.insertAdjacentHTML('beforeend', `<div class="menu"><a href="/u/${esc(state.me.username)}" data-link>View profile</a><button data-action="logout">Log out @${esc(state.me.username)}</button></div>`);
     } else if (a === 'logout') {
       await api('POST', '/api/logout'); state.me = null; go('/login', true);
+    } else if (a === 'clear-video' || a === 'cancel-video') {
+      const f = el.closest('form'); clearComposerVideo(f); updateComposer(f);
+      if (a === 'cancel-video') toast('Upload cancelled');
     } else if (a === 'clear-image') {
       const f = el.closest('form'); f.image.value = ''; $('.preview', f).hidden = true; updateComposer(f);
     } else if (a === 'close-modal') closeModal();
@@ -483,7 +515,7 @@ document.addEventListener('click', async (e) => {
 
 // ---------- modals ----------
 function openModal(html) { $('#modal-root').innerHTML = `<div class="modal-bg" data-bg>${html}</div>`; document.body.style.overflow = 'hidden'; }
-function closeModal() { $('#modal-root').innerHTML = ''; document.body.style.overflow = ''; }
+function closeModal() { $$('#modal-root form[data-form="compose"]').forEach(f => clearComposerVideo(f)); $('#modal-root').innerHTML = ''; document.body.style.overflow = ''; }
 document.addEventListener('mousedown', (e) => { if (e.target.matches('[data-bg]')) closeModal(); });
 function openCompose(parent) {
   openModal(`<div class="modal"><div class="modal-head"><button class="back" data-action="close-modal" aria-label="Close">${ic('close')}</button><h2></h2></div>
@@ -661,13 +693,13 @@ function viewAuth(mode) {
     </div></div>`;
 }
 
-async function loadFeed(url, emptyHTML) {
+async function loadFeed(url, emptyHTML, renderList = (items) => items.map(p => postHTML(p)).join('')) {
   const feed = $('#feed');
   try {
     const { items } = await api('GET', url);
     remember(items);
     if (!$('#feed') || $('#feed') !== feed) return;
-    feed.innerHTML = items.length ? items.map(p => postHTML(p)).join('') : emptyHTML;
+    feed.innerHTML = items.length ? renderList(items) : emptyHTML;
   } catch (err) { feed.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
 }
 
@@ -747,6 +779,7 @@ async function viewPost(id) {
         ${p.reply_to ? `<div class="replying" style="margin-top:8px">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
         ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
         ${p.image ? `<div class="media"><img src="${esc(p.image)}" alt=""></div>` : ''}
+        ${p.video ? videoHTML(p, { focus: true }) : ''}
         <div class="when">${fullDate(p.created_at)}</div>
         ${statsHTML(p)}
         ${actionsHTML(p)}
@@ -779,9 +812,10 @@ async function viewProfile(username, tab) {
       <div class="facts">${u.location ? `<span>${ic('pin')}${esc(u.location)}</span>` : ''}<span>${ic('cal')}Joined ${new Date(u.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span></div>
       <div class="counts"><a href="/u/${esc(u.username)}/following" data-link><b>${u.following}</b> Following</a><a href="/u/${esc(u.username)}/followers" data-link><b id="followers-count">${u.followers}</b> Followers</a></div>
     </div>
-    <div class="tabs" style="border-bottom:1px solid var(--border)">${tabLink('posts', 'Posts')}${tabLink('replies', 'Replies')}${tabLink('media', 'Media')}${tabLink('likes', 'Likes')}</div>
+    <div class="tabs" style="border-bottom:1px solid var(--border)">${tabLink('posts', 'Posts')}${tabLink('replies', 'Replies')}${tabLink('media', 'Media')}${state.config.video || tab === 'reels' ? tabLink('reels', 'Reels') : ''}${tabLink('likes', 'Likes')}</div>
     <div id="feed">${loader()}</div>`;
-  loadFeed(`/api/users/${encodeURIComponent(u.username)}/posts?tab=${tab}`, `<div class="empty"><h3>${isMe ? 'You haven’t' : '@' + esc(u.username) + ' hasn’t'} ${tab === 'likes' ? 'liked any posts' : tab === 'media' ? 'posted media' : tab === 'replies' ? 'replied to anything' : 'posted'} yet</h3><p>When ${isMe ? 'you do' : 'they do'}, it’ll show up here.</p></div>`);
+  loadFeed(`/api/users/${encodeURIComponent(u.username)}/posts?tab=${tab}`, `<div class="empty"><h3>${isMe ? 'You haven’t' : '@' + esc(u.username) + ' hasn’t'} ${tab === 'likes' ? 'liked any posts' : tab === 'media' ? 'posted media' : tab === 'reels' ? 'posted any reels' : tab === 'replies' ? 'replied to anything' : 'posted'} yet</h3><p>When ${isMe ? 'you do' : 'they do'}, it’ll show up here.</p></div>`,
+    tab === 'reels' ? reelGridHTML : undefined);
 }
 
 async function viewFollowList(username, which) {
@@ -1091,6 +1125,374 @@ document.addEventListener('click', async (e) => {
   } catch (err) { el.disabled = false; toast(err.message); }
 }, true);
 
+// ---------- Video posts + Reels (Cloudinary direct uploads) ----------
+// The browser uploads straight to Cloudinary with params signed by POST /api/video/sign (XHR progress; chunked over
+// ~20 MB), then POST /api/posts carries {video: {public_id, ...}}; the server re-checks everything with Cloudinary.
+const V_FORMATS = ['mp4', 'mov', 'webm', '3gp', 'mkv'];
+const V_MIME = /^video\/(mp4|quicktime|webm|3gpp2?|x-matroska|matroska|x-m4v)$/;
+const V_MAX_BYTES = 100 * 1024 * 1024, V_MAX_SECONDS = 180, V_MAX_REEL_SECONDS = 90;
+const fmtDur = (s) => { s = Math.max(0, Math.round(Number(s) || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const composerVideo = new WeakMap(); // form -> { file, meta, ctl, result, cloudName, url }
+
+function videoPreviewHTML(allowReel) {
+  return `<div class="vpreview" hidden data-state="">
+    <div class="vbox"><video muted playsinline preload="metadata"></video><span class="vdur"></span>
+      <button type="button" class="x" data-action="clear-video" aria-label="Remove video">${ic('close', 'icon')}</button></div>
+    <div class="vprog" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="vprog-track"><div class="vprog-bar"></div></div>
+      <span class="vprog-txt">Preparing…</span>
+      <button type="button" class="vcancel" data-action="cancel-video">Cancel</button>
+    </div>
+    ${allowReel ? `<label class="reel-toggle"><input type="checkbox" name="is_reel"><span class="sw" aria-hidden="true"></span>${ic('reels')}<span>Post as Reel</span><small class="reel-hint"></small></label>` : ''}
+  </div>`;
+}
+function videoExt(file) { return ((file.name || '').match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || ''; }
+// Duration + size from the file itself (before uploading anything). Unknown (null) when the browser can't decode it.
+function readVideoMeta(file) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video'), url = URL.createObjectURL(file);
+    let done = false;
+    const fin = (m) => { if (done) return; done = true; v.removeAttribute('src'); v.load(); URL.revokeObjectURL(url); resolve(m); };
+    v.preload = 'metadata'; v.muted = true;
+    v.onloadedmetadata = () => fin({ duration: isFinite(v.duration) ? v.duration : null, width: v.videoWidth || null, height: v.videoHeight || null });
+    v.onerror = () => fin({ duration: null, width: null, height: null });
+    setTimeout(() => fin({ duration: null, width: null, height: null }), 8000);
+    v.src = url;
+  });
+}
+function setVProgress(f, pct, txt) {
+  const box = $('.vpreview', f); if (!box) return;
+  $('.vprog-bar', box).style.width = Math.round(pct) + '%';
+  $('.vprog', box).setAttribute('aria-valuenow', String(Math.round(pct)));
+  if (txt) $('.vprog-txt', box).textContent = txt;
+}
+async function pickComposerVideo(f, file) {
+  const ext = videoExt(file);
+  if (!(V_FORMATS.includes(ext) || V_MIME.test(file.type || ''))) return toast('Use an MP4, MOV, WebM, 3GP or MKV video');
+  if (file.size > V_MAX_BYTES) return toast('Video must be 100 MB or smaller');
+  if (!file.size) return toast('That video is empty');
+  const meta = await readVideoMeta(file);
+  if (meta.duration && meta.duration > V_MAX_SECONDS + 0.5) return toast(`Videos can be up to 3 minutes (this one is ${fmtDur(meta.duration)})`);
+  clearComposerVideo(f);
+  if (f.image.files.length) { f.image.value = ''; $('.preview', f).hidden = true; }
+  const box = $('.vpreview', f); if (!box) return;
+  const vs = { file, meta, ctl: { aborted: false, xhr: null }, result: null, url: URL.createObjectURL(file) };
+  composerVideo.set(f, vs);
+  const vid = $('video', box); vid.src = vs.url;
+  $('.vdur', box).textContent = meta.duration ? fmtDur(meta.duration) : '';
+  box.hidden = false; box.dataset.state = 'uploading';
+  box.classList.toggle('vertical', !!(meta.height && meta.width && meta.height > meta.width));
+  const reel = f.is_reel, hint = $('.reel-hint', box);
+  if (reel) {
+    const tooLong = meta.duration && meta.duration > V_MAX_REEL_SECONDS + 0.5;
+    const suggest = !tooLong && meta.duration && meta.height > meta.width;
+    reel.checked = !!suggest; reel.disabled = !!tooLong;
+    hint.textContent = tooLong ? 'Reels can be up to 90 seconds' : suggest ? 'Vertical and under 90 s: great as a Reel' : '';
+  }
+  setVProgress(f, 0, 'Preparing…');
+  updateComposer(f);
+  try {
+    const sig = await api('POST', '/api/video/sign');
+    if (composerVideo.get(f) !== vs || vs.ctl.aborted) return;
+    vs.cloudName = sig.cloudName;
+    const res = await uploadVideo(file, sig, (loaded, total) => {
+      const pct = total ? loaded / total * 100 : 0;
+      setVProgress(f, pct, pct >= 100 ? 'Processing…' : `Uploading… ${Math.round(pct)}%`);
+    }, vs.ctl);
+    if (composerVideo.get(f) !== vs) return;
+    vs.result = res;
+    if (!vs.meta.duration && res.duration) $('.vdur', box).textContent = fmtDur(res.duration);
+    if (reel && res.duration > V_MAX_REEL_SECONDS + 0.5) { reel.checked = false; reel.disabled = true; hint.textContent = 'Reels can be up to 90 seconds'; }
+    setVProgress(f, 100, 'Uploaded');
+    box.dataset.state = 'done';
+  } catch (e) {
+    if (composerVideo.get(f) !== vs || vs.ctl.aborted) return;
+    toast(e.message || 'Video upload failed');
+    clearComposerVideo(f);
+  }
+  updateComposer(f);
+}
+// Stop an upload in progress, or drop a finished one that was never posted (removed from Cloudinary too).
+function clearComposerVideo(f, { posted = false } = {}) {
+  if (!f) return;
+  const vs = composerVideo.get(f);
+  composerVideo.delete(f);
+  if (vs) {
+    vs.ctl.aborted = true;
+    if (vs.ctl.xhr) try { vs.ctl.xhr.abort(); } catch {}
+    if (vs.url) URL.revokeObjectURL(vs.url);
+    if (vs.result && !posted) api('POST', '/api/video/discard', { public_id: vs.result.public_id }).catch(() => {});
+  }
+  const box = $('.vpreview', f); if (!box) return;
+  box.hidden = true; box.dataset.state = '';
+  const v = $('video', box); v.removeAttribute('src'); v.load();
+  if (f.is_reel) { f.is_reel.checked = false; f.is_reel.disabled = false; }
+}
+// Upload to Cloudinary with XHR progress. Files over chunkThreshold go up in chunkSize pieces
+// (Content-Range + X-Unique-Upload-Id, all with the same signed params); the last response describes the asset.
+function uploadVideo(file, sig, onProgress, ctl) {
+  const send = (blob, headers, base) => new Promise((resolve, reject) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(sig.params)) fd.append(k, String(v));
+    fd.append('file', blob, file.name || 'video.mp4');
+    const x = ctl.xhr = new XMLHttpRequest();
+    x.open('POST', sig.uploadUrl);
+    for (const [k, v] of Object.entries(headers)) x.setRequestHeader(k, v);
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(base + Math.min(blob.size, e.loaded / e.total * blob.size), file.size); };
+    x.onload = () => {
+      let j = null; try { j = JSON.parse(x.responseText); } catch {}
+      if (x.status >= 200 && x.status < 300 && j) resolve(j);
+      else reject(new Error((j && j.error && j.error.message) ? 'Upload failed: ' + j.error.message : 'Video upload failed (' + x.status + ')'));
+    };
+    x.onerror = () => reject(new Error('Video upload failed. Check your connection.'));
+    x.onabort = () => reject(Object.assign(new Error('Upload cancelled'), { aborted: true }));
+    x.send(fd);
+  });
+  return (async () => {
+    if (file.size <= sig.chunkThreshold) { const r = await send(file, {}, 0); onProgress(file.size, file.size); return r; }
+    const id = 'zuzu-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    let res = null;
+    for (let start = 0; start < file.size; start += sig.chunkSize) {
+      if (ctl.aborted) throw new Error('Upload cancelled');
+      const end = Math.min(start + sig.chunkSize, file.size);
+      res = await send(file.slice(start, end), { 'X-Unique-Upload-Id': id, 'Content-Range': `bytes ${start}-${end - 1}/${file.size}` }, start);
+    }
+    onProgress(file.size, file.size);
+    if (!res || !res.public_id) throw new Error('Video upload failed');
+    return res;
+  })();
+}
+
+// Inline player: muted, autoplays when ≥60% visible (one at a time), poster, playsinline, preload=metadata.
+function videoSources(v) { return v.sources.map(s => `<source src="${esc(s.src)}"${s.type ? ` type="${esc(s.type)}"` : ''}>`).join(''); }
+function videoHTML(p, { focus = false } = {}) {
+  const v = p.video, w = v.width || 16, h = v.height || 9;
+  const maxH = focus ? 640 : 510, maxW = h > w ? Math.round(maxH * w / h) : null;
+  return `<div class="media vmedia${h > w ? ' vertical' : ''}" data-video="${p.id}" style="aspect-ratio:${w}/${h};${maxW ? `max-width:${maxW}px;` : ''}">
+    <video class="vplayer" playsinline muted ${v.duration <= 60 ? 'loop' : ''} preload="metadata" poster="${esc(v.poster)}" data-dur="${v.duration}">${videoSources(v)}</video>
+    <span class="vdur-badge">${fmtDur(v.duration)}</span>
+    <button class="vmute" data-action="vmute" aria-label="${vfeed.muted ? 'Unmute' : 'Mute'}">${ic(vfeed.muted ? 'volOff' : 'volOn')}</button>
+    ${v.is_reel ? `<a class="vreel" href="/reels/${p.id}" data-link aria-label="Open in Reels">${ic('reels')}<span>Reels</span></a>` : ''}
+    <span class="vpaused" aria-hidden="true">${ic('play')}</span>
+  </div>`;
+}
+const vfeed = { muted: true, io: null, ratios: new Map(), current: null, manual: new WeakSet() };
+function vplay(v) {
+  if (vfeed.current && vfeed.current !== v) vfeed.current.pause();
+  vfeed.current = v;
+  v.muted = vfeed.muted;
+  const pr = v.play();
+  if (pr) pr.catch((e) => { if (e.name === 'NotAllowedError' && !v.muted) { v.muted = vfeed.muted = true; syncMuteIcons(); v.play().catch(() => {}); } });
+}
+function vpickFeed() {
+  let best = null, bestR = 0;
+  for (const [v, r] of vfeed.ratios) {
+    if (!v.isConnected) { vfeed.ratios.delete(v); continue; }
+    if (r >= 0.6 && r > bestR && !vfeed.manual.has(v)) { best = v; bestR = r; }
+  }
+  for (const v of vfeed.ratios.keys()) if (v !== best && !v.paused) v.pause();
+  if (best && best.paused && !document.hidden) vplay(best);
+  if (!best) vfeed.current = null;
+}
+function vobserve() {
+  if (!('IntersectionObserver' in window)) return;
+  if (!vfeed.io) vfeed.io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      vfeed.ratios.set(e.target, e.isIntersecting ? e.intersectionRatio : 0);
+      if (e.intersectionRatio < 0.6) vfeed.manual.delete(e.target); // a manual pause lasts until it leaves the screen
+    }
+    vpickFeed();
+  }, { threshold: [0, 0.25, 0.6, 0.8, 1] });
+  $$('#center video.vplayer').forEach(v => { if (!v.dataset.vobs) { v.dataset.vobs = '1'; vfeed.io.observe(v); } });
+  for (const v of [...vfeed.ratios.keys()]) if (!v.isConnected) { vfeed.ratios.delete(v); vfeed.io.unobserve(v); }
+}
+function syncMuteIcons() {
+  $$('.vmute').forEach(b => { b.innerHTML = ic(vfeed.muted ? 'volOff' : 'volOn'); b.setAttribute('aria-label', vfeed.muted ? 'Unmute' : 'Mute'); });
+}
+let vobsRaf = 0;
+new MutationObserver(() => { if (!vobsRaf) vobsRaf = requestAnimationFrame(() => { vobsRaf = 0; vobserve(); }); }).observe(document.getElementById('app'), { childList: true, subtree: true });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { $$('video').forEach(v => v.pause()); } else if (reels.active) reelsPlayActive(); else vpickFeed();
+});
+// Tap the mute icon: sound on/off for all feed videos. Tap the picture: pause/resume.
+document.addEventListener('click', (e) => {
+  const mute = e.target.closest('[data-action="vmute"]');
+  if (mute) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    vfeed.muted = !vfeed.muted; syncMuteIcons();
+    const v = $('video', mute.closest('.vmedia'));
+    if (!vfeed.muted && v.paused) { vfeed.manual.delete(v); vplay(v); } else { v.muted = vfeed.muted; if (vfeed.current) vfeed.current.muted = vfeed.muted; }
+    return;
+  }
+  const v = e.target.closest('.vmedia video');
+  if (v) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (v.paused) { vfeed.manual.delete(v); vplay(v); } else { v.pause(); vfeed.manual.add(v); }
+  }
+}, true);
+document.addEventListener('play', (e) => { const m = e.target.closest && e.target.closest('.vmedia'); if (m) m.classList.remove('paused'); }, true);
+document.addEventListener('pause', (e) => { const m = e.target.closest && e.target.closest('.vmedia'); if (m) m.classList.add('paused'); }, true);
+
+// ---------- Reels: /reels and /reels/:id (full-screen vertical swipe feed, CSS scroll-snap) ----------
+const reels = { active: null, items: [], ids: new Set(), cursor: null, more: true, loading: false, io: null, muted: null, userMuted: false, el: null, gen: 0 };
+function reelSideHTML(p) {
+  if (!p) return '';
+  return `<div class="reel-side" data-reel-side="${p.id}">
+    <button class="reel-act like ${p.liked ? 'on' : ''}" data-action="like" data-id="${p.id}" aria-label="Like"><span class="ic">${ic(p.liked ? 'heartFill' : 'heart')}</span><span class="n">${fmt(p.like_count) || ''}</span></button>
+    <button class="reel-act comment" data-action="go" data-href="/post/${p.id}" aria-label="Comments"><span class="ic">${ic('reply')}</span><span class="n">${fmt(p.reply_count) || ''}</span></button>
+    <button class="reel-act share" data-action="share-reel" data-id="${p.id}" aria-label="Share"><span class="ic">${ic('share')}</span></button>
+    ${state.config.ai ? `<button class="reel-act ai" data-action="ai-open" data-id="${p.id}" aria-label="Ask ZuZu AI" title="Ask ZuZu AI"><span class="ic">${ic('sparkle')}</span></button>` : ''}
+    <button class="reel-act mute" data-action="reel-mute" aria-label="${reelsMuted() ? 'Unmute' : 'Mute'}"><span class="ic">${ic(reelsMuted() ? 'volOff' : 'volOn')}</span></button>
+  </div>`;
+}
+function reelHTML(p) {
+  const v = p.video;
+  return `<section class="reel" data-reel="${p.id}" data-post="${p.id}">
+    <video class="reel-video" playsinline loop preload="none" poster="${esc(v.poster)}" ${reelsMuted() ? 'muted' : ''}>${videoSources(v)}</video>
+    <div class="reel-tap" data-reel-tap aria-hidden="true"></div>
+    <span class="reel-paused" aria-hidden="true">${ic('play')}</span>
+    <div class="reel-shade" aria-hidden="true"></div>
+    ${reelSideHTML(p)}
+    <div class="reel-info">
+      <a class="reel-user" href="/u/${esc(p.username)}" data-link>${avatar(p, 'sm')}<span class="h">@${esc(p.username)}</span>${idealDot(p.ideal)}</a>
+      ${p.text ? `<div class="reel-cap">${richText(p.text)}</div>` : ''}
+    </div>
+    <div class="reel-bar" aria-hidden="true"><span></span></div>
+  </section>`;
+}
+const reelsMuted = () => reels.muted !== null ? reels.muted : !(navigator.userActivation && navigator.userActivation.hasBeenActive);
+function reelGridHTML(items) {
+  return `<div class="reel-grid">${items.filter(p => p.video).map(p => `<a class="reel-tile" href="/reels/${p.id}" data-link data-reel-tile="${p.id}" aria-label="Reel by @${esc(p.username)}">
+    <img src="${esc(p.video.poster)}" alt="" loading="lazy"><span class="rt-dur">${ic('play')}${fmtDur(p.video.duration)}</span>${p.text ? `<span class="rt-cap">${esc(p.text)}</span>` : ''}</a>`).join('')}</div>`;
+}
+async function viewReels(startId) {
+  if (!state.config.video && !startId) return go('/home', true);
+  const gen = ++reels.gen;
+  Object.assign(reels, { active: null, items: [], ids: new Set(), cursor: null, more: true, loading: false });
+  shell(`<div class="reels-wrap"><div class="reels-head"><button class="back" data-action="back" aria-label="Back">${ic('back')}</button><h1>Reels</h1></div>
+    <div class="reels" id="reels" tabindex="-1">${loader()}</div></div>`, { active: 'reels', layout: 'reels' });
+  reels.el = $('#reels');
+  try {
+    const first = [];
+    if (startId) {
+      try { const { post } = await api('GET', '/api/posts/' + startId); if (post.video) first.push(post); } catch {}
+    }
+    const page = await api('GET', '/api/reels?limit=6' + (startId && first.length ? '&cursor=' + startId : ''));
+    if (gen !== reels.gen) return;
+    reels.el.innerHTML = '';
+    reelsAppend([...first, ...page.items]);
+    reels.cursor = page.next_cursor; reels.more = !!page.next_cursor;
+    if (!reels.items.length) {
+      reels.el.innerHTML = `<div class="empty reels-empty"><h3>No reels yet</h3><p>Post a vertical video under 90 seconds as a Reel and it’ll show up here.</p><button class="btn btn-primary" data-action="compose">Post a Reel</button></div>`;
+      return;
+    }
+    reelsObserve();
+    reels.el.focus({ preventScroll: true });
+  } catch (err) { if (gen === reels.gen) reels.el.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+function reelsAppend(list) {
+  const fresh = list.filter(p => p && p.video && !reels.ids.has(p.id));
+  fresh.forEach(p => reels.ids.add(p.id));
+  remember(fresh);
+  reels.items.push(...fresh);
+  reels.el.insertAdjacentHTML('beforeend', fresh.map(reelHTML).join(''));
+  if (reels.io) $$('.reel', reels.el).forEach(r => { if (!r.dataset.robs) { r.dataset.robs = '1'; reels.io.observe(r); } });
+}
+async function reelsLoadMore() {
+  if (reels.loading || !reels.more || !reels.cursor) return;
+  reels.loading = true;
+  const gen = reels.gen;
+  try {
+    const page = await api('GET', '/api/reels?limit=6&cursor=' + reels.cursor);
+    if (gen !== reels.gen) return;
+    reels.cursor = page.next_cursor; reels.more = !!page.next_cursor;
+    reelsAppend(page.items);
+  } catch {} finally { reels.loading = false; }
+}
+function reelsObserve() {
+  reels.io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting && e.intersectionRatio >= 0.6) reelsActivate(e.target);
+  }, { root: reels.el, threshold: [0.6] });
+  $$('.reel', reels.el).forEach(r => { r.dataset.robs = '1'; reels.io.observe(r); });
+}
+function reelsActivate(sec) {
+  if (reels.active === sec) return;
+  if (reels.active) { const ov = $('video', reels.active); ov.pause(); reels.active.classList.remove('active', 'paused'); }
+  reels.active = sec; sec.classList.add('active');
+  const id = +sec.dataset.reel;
+  if (location.pathname !== '/reels/' + id) history.replaceState({}, '', '/reels/' + id); // shareable link to what you're watching
+  reelsPlayActive();
+  // Preload the next one (and lazily load posters around).
+  const next = sec.nextElementSibling;
+  if (next && next.matches('.reel')) { const nv = $('video', next); if (nv.preload !== 'auto') { nv.preload = 'auto'; nv.load(); } }
+  const idx = reels.items.findIndex(p => p.id === id);
+  if (idx >= reels.items.length - 3) reelsLoadMore();
+}
+function reelsPlayActive() {
+  const sec = reels.active; if (!sec || document.hidden) return;
+  const v = $('video', sec);
+  v.muted = reelsMuted();
+  if (v.preload !== 'auto') v.preload = 'auto';
+  const pr = v.play();
+  if (pr) pr.catch((e) => { if (e.name === 'NotAllowedError' && !v.muted) { reels.muted = true; v.muted = true; reelsSyncMute(); v.play().catch(() => {}); } });
+  sec.classList.remove('paused');
+  if (!v.dataset.bar) {
+    v.dataset.bar = '1';
+    v.addEventListener('timeupdate', () => { const b = $('.reel-bar span', sec); if (b && v.duration) b.style.width = (v.currentTime / v.duration * 100) + '%'; });
+  }
+}
+function reelsSyncMute() {
+  const m = reelsMuted();
+  $$('.reel-act.mute').forEach(b => { $('.ic', b).innerHTML = ic(m ? 'volOff' : 'volOn'); b.setAttribute('aria-label', m ? 'Unmute' : 'Mute'); });
+  $$('.reel video').forEach(v => { v.muted = m; });
+}
+function reelsTeardown() {
+  if (reels.io) { reels.io.disconnect(); reels.io = null; }
+  if (reels.el) $$('video', reels.el).forEach(v => { v.pause(); v.removeAttribute('src'); });
+  reels.active = null; reels.el = null; reels.gen++;
+}
+function reelsScroll(dir) {
+  if (!reels.el || !reels.active) return;
+  const target = dir > 0 ? reels.active.nextElementSibling : reels.active.previousElementSibling;
+  if (target && target.matches('.reel')) reels.el.scrollTo({ top: target.offsetTop, behavior: 'smooth' });
+}
+document.addEventListener('click', async (e) => {
+  if (!reels.el) return;
+  const tap = e.target.closest('[data-reel-tap]');
+  const act = e.target.closest('[data-action="reel-mute"],[data-action="share-reel"]');
+  if (!tap && !act) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (tap) {
+    const sec = tap.closest('.reel'); if (sec !== reels.active) reelsActivate(sec);
+    const v = $('video', sec);
+    if (reels.skipTap) { reels.skipTap = false; if (v.paused) reelsPlayActive(); return; }
+    if (v.paused) { reelsPlayActive(); } else { v.pause(); sec.classList.add('paused'); }
+    return;
+  }
+  if (act.dataset.action === 'reel-mute') {
+    reels.muted = !reelsMuted(); reels.userMuted = reels.muted; reelsSyncMute();
+    if (reels.active) { const v = $('video', reels.active); if (v.paused && !reels.active.classList.contains('paused')) reelsPlayActive(); }
+  } else {
+    const url = location.origin + '/reels/' + act.dataset.id;
+    try { if (navigator.share) await navigator.share({ url }); else { await navigator.clipboard.writeText(url); toast('Link copied'); } }
+    catch (err) { if (err && err.name !== 'AbortError') toast(url); }
+  }
+}, true);
+// Sound comes on with the first user gesture on the Reels page (unless the user muted it).
+['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, (e) => {
+  if (!reels.el || reels.userMuted || !reelsMuted()) return;
+  if (e.target.closest && e.target.closest('[data-action="reel-mute"]')) return; // that button decides itself
+  reels.muted = false; reelsSyncMute();
+  if (e.target.closest && e.target.closest('[data-reel-tap]')) reels.skipTap = true; // this first tap only turns the sound on
+}, { capture: true }));
+document.addEventListener('keydown', (e) => {
+  if (!reels.el || e.target.closest('input,textarea,[contenteditable]') || $('#ai-root') || $('#modal-root').childElementCount) return;
+  if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); reelsScroll(1); }
+  else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); reelsScroll(-1); }
+  else if (e.key === ' ' && reels.active) { e.preventDefault(); $('[data-reel-tap]', reels.active).click(); }
+  else if (e.key === 'm') { $('.reel-act.mute', reels.active)?.click(); }
+});
+
 // ---------- ZuZu AI: "Ask ZuZu AI" about a post (side panel on desktop, bottom sheet on mobile) ----------
 const AI_Q_MAX = 500;
 const ai = { post: null, history: [], busy: false, ctrl: null, opener: null };
@@ -1164,7 +1566,7 @@ function openAi(id, opener) {
     <header class="ai-head"><h2 id="ai-title">${ic('sparkle')}<span>ZuZu AI</span></h2><button class="ai-x" data-action="ai-close" aria-label="Close">${ic('close')}</button></header>
     <div class="ai-scroll" id="ai-scroll">
       <div class="ai-post">${avatar(p, 'sm')}<div class="b"><div class="m"><b>${esc(p.name)}</b><span>@${esc(p.username)} · ${ago(p.created_at)}</span></div>
-        ${p.text ? `<div class="t">${richText(p.text)}</div>` : ''}${p.image ? `<div class="ai-img">${ic('image')}Image (ZuZu AI only reads the text)</div>` : ''}</div></div>
+        ${p.text ? `<div class="t">${richText(p.text)}</div>` : ''}${p.image ? `<div class="ai-img">${ic('image')}Image (ZuZu AI only reads the text)</div>` : ''}${p.video ? `<div class="ai-img ai-vid">${ic(p.video.is_reel ? 'reels' : 'video')}${p.video.is_reel ? 'Reel' : 'Video'} · ${fmtDur(p.video.duration)} (ZuZu AI reads the caption, not the video)</div>` : ''}</div></div>
       <div class="ai-chips">${aiChips(p).map(([k, l]) => `<button class="ai-chip" data-action="ai-chip" data-key="${k}">${ic('sparkle')}${esc(l)}</button>`).join('')}</div>
       <div class="ai-msgs" id="ai-msgs" aria-live="polite"></div>
     </div>
@@ -1349,6 +1751,8 @@ function renderAdmin(s) {
       ${adminCard('Active today', num(s.active_users_today), 'posted, replied, liked or DMed', 'active')}
       ${adminCard('Posts', num(s.posts.total), `${num(s.posts.today)} today`, 'posts')}
       ${adminCard('DMs', num(s.dms.total), `${num(s.dms.today)} today`, 'dms')}
+      ${s.videos ? adminCard('Videos', num(s.videos.total), `${num(s.videos.today)} today`, 'videos') : ''}
+      ${s.videos ? adminCard('Reels', num(s.videos.reels), `${num(s.videos.reels_today)} today`, 'reels') : ''}
     </div>
     ${adminChart(s.daily_signups)}
     ${s.ideals ? adminIdeals(s.ideals) : ''}
@@ -1697,7 +2101,7 @@ function momoOnScroll() {
   momoSettleSoon();
 }
 function momoAllowed() {
-  return momoOn() && !!state.me && MOMO_ROUTES.test(location.pathname) && !document.hidden
+  return momoOn() && !!state.me && MOMO_ROUTES.test(location.pathname) && !document.body.classList.contains('reels-page') && !document.hidden
     && !document.body.classList.contains('ai-open') && !$('#modal-root').childElementCount;
 }
 function momoActivate() {

@@ -134,3 +134,30 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS ideal_qualities TEXT[];
 
 -- Momo the monkey: one short cached reflection per post (generated once by Groq, NULL until then).
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS monkey_thought TEXT;
+
+-- Video posts + Reels. The video itself lives on Cloudinary (never in Postgres): one row per post with the asset id,
+-- Cloudinary's own metadata (checked on post) and a poster URL. Deleted with the post; the asset goes into
+-- video_deletions first so the server can destroy it on Cloudinary (best effort, retried).
+CREATE TABLE IF NOT EXISTS post_videos(
+  post_id INTEGER PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  public_id TEXT NOT NULL,
+  cloud_name TEXT NOT NULL,
+  version BIGINT,
+  format TEXT,
+  duration REAL NOT NULL,
+  width INTEGER,
+  height INTEGER,
+  bytes BIGINT,
+  poster TEXT,
+  is_reel BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at BIGINT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS post_videos_public_id ON post_videos(public_id);
+CREATE INDEX IF NOT EXISTS post_videos_reels ON post_videos(post_id DESC) WHERE is_reel;
+CREATE INDEX IF NOT EXISTS post_videos_created ON post_videos(created_at);
+
+CREATE TABLE IF NOT EXISTS video_deletions(
+  public_id TEXT PRIMARY KEY,
+  cloud_name TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at BIGINT NOT NULL);

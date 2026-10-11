@@ -49,7 +49,7 @@ const userOut = (r) => ({ id: r.id, username: r.username, name: r.name, created_
 async function stats(db, { nowMs = Date.now(), since = null } = {}) {
   const w = windows(nowMs);
   const p = { t0: w.todayStart, y0: w.yesterdayStart, d7: w.last7Start, d30: w.last30Start, off: IST_OFFSET_MS, day: DAY_MS };
-  const [u, daily, latest, posts, dms, active, idealRows] = await Promise.all([
+  const [u, daily, latest, posts, dms, active, idealRows, vids] = await Promise.all([
     db.get(`SELECT COUNT(*)::int total,
         COUNT(*) FILTER (WHERE NOT is_demo)::int real,
         COUNT(*) FILTER (WHERE is_demo)::int demo,
@@ -76,6 +76,10 @@ async function stats(db, { nowMs = Date.now(), since = null } = {}) {
     db.all(`SELECT ideal_preset_id preset_id, CASE WHEN ideal_preset_id IS NULL THEN lower(ideal_name) END k,
         MIN(ideal_name) ideal_name, MIN(ideal_qualities[1]) q1, COUNT(*)::int n
       FROM users WHERE NOT is_demo AND ideal_name IS NOT NULL GROUP BY 1, 2`),
+    // Video posts (Cloudinary) and how many of them are Reels.
+    db.get(`SELECT COUNT(*)::int total, COUNT(*) FILTER (WHERE is_reel)::int reels,
+        COUNT(*) FILTER (WHERE created_at >= @t0)::int today, COUNT(*) FILTER (WHERE is_reel AND created_at >= @t0)::int reels_today
+      FROM post_videos`, p),
   ]);
   const byDay = new Map(daily.map(r => [r.d, r.n]));
   const series = [];
@@ -90,6 +94,7 @@ async function stats(db, { nowMs = Date.now(), since = null } = {}) {
     latest_signups: latest.map(userOut),
     posts: { total: posts.total, today: posts.today, replies_today: posts.replies_today },
     dms: { total: dms.total, today: dms.today },
+    videos: { total: vids.total, today: vids.today, reels: vids.reels, reels_today: vids.reels_today },
     active_users_today: active.n,
     ideals: idealBreakdown(idealRows, u.real),
   };
