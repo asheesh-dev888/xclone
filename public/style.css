@@ -574,3 +574,86 @@ body.admin-page .fab{display:none}
   .ideal-sub{font-size:13px}
   .ib-cols{grid-template-columns:1fr}
 }
+/* Momo the monkey 🐒 (fixed to the viewport; JS sets translate3d on #momo) */
+.momo{--mh:72px;position:fixed;left:0;top:0;z-index:35;width:calc(var(--mh) * 100 / 120);height:var(--mh);pointer-events:none;will-change:transform;transition:opacity .22s ease;contain:layout style}
+.momo[hidden]{display:none}
+.momo.fading{opacity:0}
+.momo-fig{position:absolute;inset:0;pointer-events:none;cursor:pointer;transform-origin:50% 80%;transition:transform .14s ease-out;-webkit-tap-highlight-color:transparent;outline:0}
+.momo-fig:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:12px}
+.momo-svg{display:block;width:100%;height:100%;overflow:visible;filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}
+.momo-svg g{transform-box:fill-box}
+.momo-svg .m-torso,.momo-svg .m-head,.momo-svg .m-tail,.momo-svg .m-arm-think{pointer-events:visiblePainted} /* only the painted monkey is tappable; dangling legs are click-through */
+.m-shadow{fill:#000;opacity:0;transition:opacity .2s}
+.st-idle .m-shadow{opacity:.35}
+.m-tail{transform-origin:0% 100%;animation:momo-tail 2.6s ease-in-out infinite alternate}
+.m-torso{transform-origin:50% 100%;animation:momo-breathe 3.2s ease-in-out infinite}
+.m-head{transform-origin:50% 90%;transition:transform .3s}
+.m-eyes{transform-origin:50% 50%;animation:momo-blink 4.6s infinite}
+.m-eyes-closed{display:none}
+.m-leg{transform-origin:50% 0%;transition:transform .15s}
+.st-sit .m-leg-l,.st-think .m-leg-l{animation:momo-swing 1.6s ease-in-out infinite}
+.st-sit .m-leg-r,.st-think .m-leg-r{animation:momo-swing 1.6s ease-in-out -.8s infinite}
+.m-arm-think{opacity:0;transition:opacity .2s}
+.st-think .m-arm-think{opacity:1}
+.st-think .m-arm-r{opacity:0}
+.st-think .m-head{transform:rotate(-6deg)}
+.st-think .m-eyes{transform:translate(1.5px,-1.5px);animation:none}
+.st-crouch .momo-fig{transform:scale(1.14,.8)}
+.st-jump .momo-fig{transform:scale(.9,1.12)}
+.st-jump .m-leg-l{transform:rotate(28deg)}.st-jump .m-leg-r{transform:rotate(-28deg)}
+.st-jump .m-arm-l,.st-jump .m-arm-r{transform:translateY(-6px)}
+.st-land .momo-fig{animation:momo-land .26s ease-out}
+.st-sleep .m-eyes{display:none}.st-sleep .m-eyes-closed{display:inline}
+.st-sleep .m-head{transform:rotate(9deg)}
+.st-sleep .m-torso{animation-duration:5s}
+.st-sleep .m-tail{animation-duration:6s}
+.momo.paused *{animation-play-state:paused!important}
+@keyframes momo-tail{from{transform:rotate(-8deg)}to{transform:rotate(12deg)}}
+@keyframes momo-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.035,1.05)}}
+@keyframes momo-blink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
+@keyframes momo-swing{0%,100%{transform:rotate(-14deg)}50%{transform:rotate(14deg)}}
+@keyframes momo-land{0%{transform:scale(1.28,.72)}55%{transform:scale(.94,1.07)}100%{transform:scale(1)}}
+/* thought bubble: a cloud with little circles leading to Momo's head */
+.momo-bubble{position:absolute;right:calc(50% - 10px);bottom:calc(100% + 22px);pointer-events:auto;filter:drop-shadow(0 3px 8px rgba(0,0,0,.5));animation:momo-pop .28s cubic-bezier(.2,1.4,.4,1);transform-origin:90% 100%;transition:opacity .4s}
+.momo-bubble[hidden]{display:none}
+.momo-bubble.out{opacity:0}
+.mb-cloud{position:relative;isolation:isolate;background:#fff;color:#0f1419;border-radius:24px;padding:11px 16px;width:max-content;min-width:110px;max-width:min(240px,calc(100vw - 110px));font-size:14px;line-height:1.32;font-weight:600;overflow-wrap:anywhere;cursor:default}
+.momo-bubble.can-ask .mb-cloud{cursor:pointer}
+.mb-cloud .pf{position:absolute;background:#fff;border-radius:50%;z-index:-1}
+.mb-cloud .p1{width:34px;height:34px;top:-11px;left:8px}
+.mb-cloud .p2{width:46px;height:46px;top:-17px;left:34%}
+.mb-cloud .p3{width:30px;height:30px;top:-9px;right:12px}
+.mb-cloud .p4{width:28px;height:28px;bottom:-9px;left:20px}
+.mb-cloud .p5{width:32px;height:32px;bottom:-11px;right:28%}
+.mb-ic{margin-right:5px;font-size:13px}
+.mb-text{position:relative}
+.mb-dot{position:absolute;background:#fff;border-radius:50%}
+.mb-dot.d1{width:11px;height:11px;right:4px;bottom:-15px}
+.mb-dot.d2{width:7px;height:7px;right:-3px;bottom:-25px}
+.mb-dot.d3{width:4px;height:4px;right:-8px;bottom:-32px}
+.momo-bubble.side{right:calc(100% + 16px);bottom:auto;top:-6px;transform-origin:100% 30%}
+.momo-bubble.side .d1{right:-14px;bottom:auto;top:18px}
+.momo-bubble.side .d2{right:-24px;bottom:auto;top:24px}
+.momo-bubble.side .d3{right:-31px;bottom:auto;top:28px}
+.momo-bubble.zzz .mb-cloud{min-width:0;padding:8px 14px;font-size:15px;letter-spacing:2px;color:#536471}
+.momo-bubble.zzz .mb-ic{display:none}
+.momo-bubble.zzz .mb-text{display:inline-block;animation:momo-zzz 2.4s ease-in-out infinite}
+@keyframes momo-pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes momo-zzz{0%,100%{transform:translateY(0);opacity:.7}50%{transform:translateY(-3px);opacity:1}}
+/* "Show Momo 🐒" toggle (left nav; 🐒 button in the mobile top bar) */
+.nav-momo{font-size:17px}
+.momo-switch{width:34px;height:20px;border-radius:999px;background:#3e4144;position:relative;flex:none;transition:background .2s;margin:0 -4px}
+.momo-switch span{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s}
+.nav-momo[aria-pressed="true"] .momo-switch{background:var(--blue)}
+.nav-momo[aria-pressed="true"] .momo-switch span{transform:translateX(14px)}
+.mobile-top .mt-right{display:flex;align-items:center;gap:6px}
+.momo-mtoggle{width:32px;height:32px;border-radius:50%;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;opacity:.45;filter:grayscale(1)}
+.momo-mtoggle[aria-pressed="true"]{opacity:1;filter:none}
+@media (max-width:700px){
+  .momo{--mh:56px}
+  .mb-cloud{font-size:13px;padding:9px 13px;max-width:min(210px,calc(100vw - 90px))}
+}
+@media (prefers-reduced-motion:reduce){
+  .momo *,.momo-bubble{animation:none!important}
+  .momo-fig,.m-leg,.m-head{transition:none}
+}

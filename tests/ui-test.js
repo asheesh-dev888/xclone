@@ -16,6 +16,13 @@ function makePng(w, h, [r, g, b]) {
 const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = document.querySelector(s); return i && i.complete && i.naturalWidth > 0; }, sel, { timeout: 10000 });
 (async () => {
   const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  // The main server may have a real GROQ_API_KEY: never let Momo ask it for thoughts during tests (served locally instead).
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (opts) => {
+    const c = await newContext(opts);
+    await c.route(BASE.replace(/\/$/, '') + '/api/monkey/**', (r) => r.fulfill({ json: { thought: 'Test thought from the stubbed endpoint 🍌', source: 'test' } }));
+    return c;
+  };
   const errors = [];
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   const page = await ctx.newPage();
@@ -175,6 +182,8 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await googleUi(browser, errors, step);
   console.log('\n  ZuZu AI');
   await aiUi(browser, errors, step, await ctx.storageState());
+  console.log('\n  Momo the monkey');
+  await monkeyUi(browser, errors, step);
   console.log('\n  Admin dashboard');
   await adminUi(browser, errors, step, await ctx.storageState());
   console.log('\n  Choose your ideal');
@@ -935,4 +944,204 @@ async function idealUi(browser, errors, step) {
   if (await p.evaluate(() => document.documentElement.scrollWidth) > 390) throw new Error('mobile profile overflows');
   step('mobile: profile badge fits, red for Courage');
   await ctx.close();
+}
+
+// ---------- Momo the monkey ----------
+async function monkeyUi(browser, errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping Momo UI: needs a local server)');
+  const watch = (p) => { p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
+  const { startMockGroq, startApp, MOCK_THOUGHTS, clearMockThoughts } = require('./ai-server');
+  await clearMockThoughts(); // start fresh so thoughts really come from the (mock) Groq
+  const mock = await startMockGroq();
+  const app = await startApp({ port: 4204, ai: { baseUrl: mock.url } });
+  const B = app.url;
+  const desktop = { viewport: { width: 1366, height: 900 } };
+  const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+  const fetched = [];
+  const login = async (opts) => {
+    const ctx = await browser.newContext(opts);
+    const r = await ctx.request.post(B + '/api/login', { data: { username: 'demo', password: 'demo1234' } });
+    if (!r.ok()) throw new Error('demo login failed');
+    const page = await ctx.newPage(); watch(page);
+    page.on('request', (q) => { const m = q.url().match(/\/api\/monkey\/thought\/(\d+)/); if (m) fetched.push(+m[1]); });
+    await page.addInitScript(() => {
+      window.__momoStates = [];
+      new MutationObserver(() => { const m = document.getElementById('momo'); if (m && !m.__w) { m.__w = 1; new MutationObserver(() => window.__momoStates.push(m.dataset.state)).observe(m, { attributes: true, attributeFilter: ['data-state'] }); } })
+        .observe(document, { childList: true, subtree: true });
+    });
+    return { ctx, page };
+  };
+  const info = (p) => p.evaluate(() => {
+    const m = document.getElementById('momo'); if (!m) return { exists: false, hidden: true };
+    const r = m.querySelector('.momo-svg').getBoundingClientRect();
+    return { exists: true, hidden: m.hidden || getComputedStyle(m).display === 'none', state: m.dataset.state, post: m.dataset.post || '', h: r.height, top: r.top, bottom: r.bottom,
+      bubble: !m.querySelector('.momo-bubble').hidden, text: m.querySelector('.mb-text').textContent };
+  });
+  const visible = (p) => p.waitForFunction(() => { const m = document.getElementById('momo'); return m && !m.hidden; }, null, { timeout: 5000 });
+  const hiddenNow = async (p, where) => { await p.waitForTimeout(150); const i = await info(p); if (!i.hidden) throw new Error('Momo should be hidden ' + where); };
+  const settled = (p, notPost = '') => p.waitForFunction((np) => { const m = document.getElementById('momo'); return m && !m.hidden && m.dataset.post && m.dataset.post !== np && ['sit', 'think'].includes(m.dataset.state); }, notPost, { timeout: 8000 });
+  const bubbleUp = (p) => p.waitForFunction(() => { const m = document.getElementById('momo'); return m && !m.querySelector('.momo-bubble').hidden && m.querySelector('.mb-text').textContent.trim().length > 0; }, null, { timeout: 6000 });
+  const perch = (p) => p.evaluate(() => {
+    const m = document.getElementById('momo'), r = m.querySelector('.momo-svg').getBoundingClientRect();
+    const post = document.querySelector(`#center [data-post="${m.dataset.post}"]`), pr = (post.closest('.repost-wrap') || post).getBoundingClientRect();
+    const hit = (a, b) => a.right > b.left + 1 && a.left < b.right - 1 && a.bottom > b.top + 1 && a.top < b.bottom - 1;
+    // The drawing's painted area (the 100x120 box has transparent margins); body above the seat line, legs below it are click-through.
+    const fig = { left: r.left + r.width * 0.12, right: r.left + r.width * 0.96, top: r.top, bottom: r.bottom }, seat = r.top + r.height * 96 / 120;
+    const blocked = [...document.querySelectorAll('#center .actions .act, #center .composer')].filter(e => hit(fig, e.getBoundingClientRect()))
+      .concat([...document.querySelectorAll('#center .more, #center .ai-btn')].filter(e => hit({ ...fig, bottom: seat }, e.getBoundingClientRect()))).map(e => e.className);
+    return { onTopEdge: r.top < pr.top && r.bottom > pr.top, withinPost: r.left >= pr.left - 1 && r.left < pr.right, rightSide: (r.left + r.right) / 2 > pr.left + pr.width / 2, blocked, postTop: pr.top, momoTop: r.top, momoBottom: r.bottom };
+  });
+  const scroll = (p, dy) => p.evaluate((d) => window.scrollBy(0, d), dy);
+  try {
+    let { ctx, page: p } = await login(desktop);
+    await p.goto(B + '/home'); await p.waitForSelector('#feed .post');
+    await visible(p);
+    let i = await info(p);
+    if (i.h < 68 || i.h > 76) throw new Error('desktop Momo should be ~72px tall, got ' + i.h);
+    step(`Momo is visible on home (fixed, ${Math.round(i.h)}px tall)`);
+
+    // scroll, stop -> jumps onto the post nearest the centre, sitting on its top-right edge
+    await p.mouse.move(683, 450); await p.mouse.wheel(0, 700);
+    await settled(p);
+    let pc = await perch(p);
+    if (!pc.onTopEdge || !pc.withinPost || !pc.rightSide) throw new Error('Momo is not sitting on the post\'s top-right edge: ' + JSON.stringify(pc));
+    if (pc.blocked.length) throw new Error('Momo covers buttons / composer: ' + pc.blocked.join());
+    const states = await p.evaluate(() => window.__momoStates.slice());
+    if (!['crouch', 'jump', 'land'].every(s => states.includes(s))) throw new Error('no crouch/jump/land sequence: ' + states.join());
+    i = await info(p);
+    step(`after scrolling stops Momo crouches, jumps and lands on post ${i.post}: overlaps its top edge at the right, covers no buttons`);
+    await bubbleUp(p);
+    i = await info(p);
+    if (!MOCK_THOUGHTS.includes(i.text) || [...i.text].length > 90) throw new Error('unexpected bubble text: ' + i.text);
+    if (!(await p.$('#momo.st-think'))) throw new Error('Momo should be thinking (hand on chin) while the bubble shows');
+    step(`thought bubble appears with text: "${i.text}"`);
+    await p.waitForTimeout(400);
+    await p.screenshot({ path: OUT + '/18-monkey-desktop.png' });
+    step('screenshot 18-monkey-desktop.png');
+
+    // rides along while scrolling
+    const firstPost = i.post;
+    await scroll(p, 90); await p.waitForTimeout(80);
+    pc = await perch(p);
+    if (!pc.onTopEdge) throw new Error('Momo did not ride along with its post while scrolling: ' + JSON.stringify(pc));
+    step('rides along with its post while the page scrolls');
+    // ...and hops to another post when scrolling stops elsewhere
+    await p.evaluate(() => { window.__momoStates.length = 0; });
+    await p.mouse.wheel(0, 650);
+    await settled(p, firstPost);
+    pc = await perch(p); i = await info(p);
+    if (!pc.onTopEdge || pc.blocked.length) throw new Error('second perch wrong: ' + JSON.stringify(pc));
+    step(`hops to the next post (${firstPost} -> ${i.post}) when scrolling stops again`);
+    await bubbleUp(p);
+
+    // bubble fades after ~6 s; tapping Momo shows it again (no refetch)
+    const t0 = Date.now();
+    await p.waitForFunction(() => document.querySelector('#momo .momo-bubble').hidden, null, { timeout: 9000 });
+    const lasted = Date.now() - t0;
+    if (lasted < 4000) throw new Error('bubble disappeared too early: ' + lasted + 'ms');
+    i = await info(p);
+    const thoughtText = (await p.evaluate(() => document.querySelector('#momo .mb-text').textContent));
+    await p.click('#momo .momo-fig');
+    await bubbleUp(p);
+    if ((await info(p)).text !== thoughtText) throw new Error('tap should show the thought again');
+    await p.click('#momo .momo-fig');
+    await p.waitForTimeout(100);
+    if ((await info(p)).text === thoughtText) throw new Error('second tap should show a new line');
+    const dup = fetched.filter((id, k) => fetched.indexOf(id) !== k);
+    if (dup.length) throw new Error('thoughts refetched for posts ' + dup.join());
+    step(`bubble fades after ~${Math.round(lasted / 1000)}s; tap shows the thought again, tap again for a new one; thoughts cached client-side (${fetched.length} fetches, no repeats)`);
+
+    // tapping the bubble opens Ask ZuZu AI for that post; Momo hides while panels/modals are open
+    await p.click('#momo .momo-fig'); await p.click('#momo .momo-fig'); // make sure a thought (not a tap line) is showing
+    await p.waitForFunction(() => document.querySelector('#momo .momo-bubble.can-ask'), null, { timeout: 5000 }).catch(async () => { await p.click('#momo .momo-fig'); await p.waitForSelector('#momo .momo-bubble.can-ask', { timeout: 5000 }); });
+    const askId = (await info(p)).post;
+    await p.click('#momo .mb-cloud');
+    await p.waitForSelector('#ai-root .ai-panel');
+    const aiPostText = await p.textContent('#ai-root .ai-post');
+    const postText = await p.textContent(`#center [data-post="${askId}"] .text`);
+    if (!aiPostText.includes(postText.trim().slice(0, 30))) throw new Error('AI panel opened for the wrong post');
+    await hiddenNow(p, 'while the AI panel is open');
+    await p.keyboard.press('Escape'); await p.waitForSelector('#ai-root', { state: 'detached' });
+    await visible(p);
+    step('tapping the bubble opens "Ask ZuZu AI" for that post; Momo hides while the panel is open and returns after');
+    await p.click('.nav [data-action=compose]'); await p.waitForSelector('.modal textarea');
+    await hiddenNow(p, 'while the compose modal is open');
+    await p.keyboard.press('Escape'); await visible(p);
+    step('hidden while the compose modal is open');
+
+    // other pages
+    await p.goto(B + '/post/1'); await p.waitForSelector('.focus'); await visible(p); await scroll(p, 200); await settled(p);
+    if (!(await perch(p)).onTopEdge) throw new Error('not perched on a post in the thread view');
+    await p.goto(B + '/u/priya_codes'); await p.waitForSelector('#feed .post'); await visible(p); await scroll(p, 500); await settled(p);
+    await p.goto(B + '/explore'); await p.waitForSelector('#feed .post'); await visible(p); await scroll(p, 400); await settled(p);
+    step('shown and perching on the thread view, profiles and explore');
+    await p.goto(B + '/messages'); await p.waitForSelector('#dm-convs'); await hiddenNow(p, 'on DMs');
+    await p.goto(B + '/notifications'); await p.waitForSelector('.header'); await hiddenNow(p, 'on notifications');
+    step('hidden on DMs (and other pages without a feed)');
+
+    // toggle in the left nav, persisted in localStorage
+    await p.goto(B + '/home'); await p.waitForSelector('#feed .post'); await visible(p);
+    if ((await p.getAttribute('.nav .nav-momo', 'aria-pressed')) !== 'true' || !(await p.textContent('.nav .nav-momo')).includes('Show Momo 🐒')) throw new Error('"Show Momo 🐒" toggle missing / not on by default');
+    await p.click('.nav .nav-momo');
+    await hiddenNow(p, 'after turning the toggle off');
+    if (await p.evaluate(() => localStorage.getItem('zuzu.momo')) !== '0') throw new Error('toggle not saved');
+    await p.reload(); await p.waitForSelector('#feed .post'); await p.waitForTimeout(800);
+    await hiddenNow(p, 'after reload with the toggle off');
+    if ((await p.getAttribute('.nav .nav-momo', 'aria-pressed')) !== 'false') throw new Error('toggle state not shown after reload');
+    await p.click('.nav .nav-momo'); await visible(p);
+    step('"Show Momo 🐒" toggle in the left nav hides him; the choice persists across reloads; on again');
+
+    // falls asleep when idle ("zzz"), wakes on scroll
+    await p.evaluate(() => localStorage.setItem('zuzu.momoIdleMs', '2500'));
+    await p.reload(); await p.waitForSelector('#feed .post'); await visible(p);
+    await p.waitForFunction(() => document.getElementById('momo').dataset.state === 'sleep', null, { timeout: 9000 });
+    i = await info(p);
+    if (!i.bubble || !/z z z/.test(i.text)) throw new Error('no zzz bubble while asleep');
+    await p.mouse.wheel(0, 300);
+    await p.waitForFunction(() => document.getElementById('momo').dataset.state !== 'sleep', null, { timeout: 3000 });
+    await p.evaluate(() => localStorage.removeItem('zuzu.momoIdleMs'));
+    step('falls asleep with a "z z z" bubble when idle, wakes on scroll');
+    await ctx.close();
+
+    // logged out: login / sign-up pages
+    ctx = await browser.newContext(desktop); p = await ctx.newPage(); watch(p);
+    await p.goto(B + '/login'); await p.waitForSelector('form[data-form=auth]'); await hiddenNow(p, 'on the login page');
+    await p.goto(B + '/signup'); await p.waitForSelector('form[data-mode=signup]'); await hiddenNow(p, 'on the sign-up page');
+    await ctx.close();
+    step('hidden on login and sign-up');
+
+    // reduced motion: fades between posts instead of jumping
+    ({ ctx, page: p } = await login({ ...desktop, reducedMotion: 'reduce' }));
+    await p.goto(B + '/home'); await p.waitForSelector('#feed .post'); await visible(p);
+    await p.mouse.move(683, 450); await p.mouse.wheel(0, 700); await settled(p);
+    let st = await p.evaluate(() => window.__momoStates.slice());
+    if (st.includes('jump') || st.includes('crouch') || !st.includes('fade')) throw new Error('reduced motion should fade, not jump: ' + st.join());
+    if (!(await perch(p)).onTopEdge) throw new Error('reduced motion: not on the post');
+    await ctx.close();
+    step('prefers-reduced-motion: fades between positions (no jump)');
+
+    // mobile: smaller, clear of the bottom tab bar
+    ({ ctx, page: p } = await login(mobile));
+    await p.goto(B + '/home'); await p.waitForSelector('#feed .post'); await visible(p);
+    if (!(await p.isVisible('.mobile-top .momo-mtoggle'))) throw new Error('mobile Momo toggle missing');
+    await scroll(p, 650); await settled(p);
+    i = await info(p); pc = await perch(p);
+    const navTop = await p.evaluate(() => document.querySelector('.bottom-nav').getBoundingClientRect().top);
+    if (i.h < 52 || i.h > 60) throw new Error('mobile Momo should be ~56px tall, got ' + i.h);
+    if (i.bottom > navTop || !pc.onTopEdge || pc.blocked.length) throw new Error('mobile perch wrong: ' + JSON.stringify({ ...pc, navTop }));
+    await bubbleUp(p); await p.waitForTimeout(400);
+    if (await p.evaluate(() => document.documentElement.scrollWidth) > 390) throw new Error('mobile horizontal overflow with Momo');
+    await p.screenshot({ path: OUT + '/19-monkey-mobile.png' });
+    step(`mobile: ${Math.round(i.h)}px tall, perched above the bottom tab bar (screenshot 19-monkey-mobile.png)`);
+    await p.locator('.mobile-top .momo-mtoggle').tap(); await hiddenNow(p, 'after the mobile toggle');
+    await p.locator('.mobile-top .momo-mtoggle').tap(); await visible(p);
+    step('mobile toggle (🐒 in the top bar) works');
+    await ctx.close();
+    const n = mock.calls.length;
+    if (!n || n > new Set(fetched).size || mock.calls.some(c => c.body.stream !== false || !/You are Momo/.test(c.body.messages[0].content))) throw new Error('unexpected Groq traffic: ' + n);
+    step(`${n} mocked Groq calls, one per post at most (${new Set(fetched).size} posts, ${fetched.length} fetches); never the real API`);
+  } finally {
+    app.child.kill(); mock.srv.close();
+    await clearMockThoughts().catch(() => {});
+  }
 }

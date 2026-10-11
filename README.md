@@ -161,6 +161,43 @@ or a one-time home-feed prompt. It's optional ("Skip for now" is the default).
   New Google accounts land on `/home?ideal=1`, which opens the picker once. Users without an ideal see a dismissible
   "Choose your ideal" card at the top of the home feed (dismissal in `localStorage` `zuzu.idealPromptDismissed.<user id>`).
 
+## Momo the monkey 🐒
+A playful cartoon monkey (inline SVG + CSS, no assets or libraries) that keeps you company in the feed. He's fixed to
+the viewport. When scrolling stops for ~600 ms he crouches, jumps in an arc (squash and stretch on landing) onto the post
+nearest the centre of the screen and sits on its top-right corner with his legs dangling. While the page scrolls he
+rides along with that post; if it leaves the view he hops to the next one. After landing he puts a hand on his chin and
+shows a cloud thought bubble (💬) with a short reflection on the post for ~6 s. Tap Momo to see the thought again
+(tap again for a playful new line); tap the bubble to open "Ask ZuZu AI" for that post (when AI is enabled).
+
+- Where: home, explore, profiles and the thread view. Hidden on login/sign-up, DMs, admin, other pages, and while the
+  ZuZu AI panel or any modal is open. He never perches where he'd cover a post's action buttons, the ⋯ / AI buttons
+  (his dangling legs are click-through) or the composer. Mobile: ~56 px tall (72 px on desktop), kept above the
+  bottom tab bar.
+- Motion: requestAnimationFrame + CSS transforms (one rect read then one transform write per frame), IntersectionObserver
+  for which posts are visible / when his post leaves the view, plus scroll-end detection. `prefers-reduced-motion`:
+  fades between posts instead of jumping and stops the idle animations. No work while the tab is hidden; after ~2 minutes
+  without activity he falls asleep with a "z z z" bubble and wakes on scroll.
+- Toggle: "Show Momo 🐒" in the left nav (🐒 button in the mobile top bar), saved in `localStorage` `zuzu.momo`
+  (`'0'` = off; on by default).
+
+Server (`monkey.js`): `GET /api/monkey/thought/:postId` (login required, `Cache-Control: no-store`) returns
+`{thought, source}` with `source` = `ai` | `cache` | `fallback` | `rate_limited`; 404 for unknown posts (reposts resolve to
+the original). Thoughts come from Groq (same `GROQ_*` env and model as ZuZu AI, non-streaming, 60 completion tokens +
+the 400-token reasoning headroom for gpt-oss, low reasoning effort, 12 s timeout) with a tight system prompt: "You are
+Momo, ZuZu's playful monkey… one short, kind reflection, max 90 characters, at most one emoji, in the post's language
+(Hindi / Hinglish when the post is)". The post text is untrusted: it is sent only as JSON between
+`<<<MOMO_DATA_<nonce>>>>` markers (marker-like `<<<`/`>>>` neutralised) and the prompt says never to follow instructions
+inside it. Output is cleaned (no quotes/labels/markdown, one emoji max) and capped at 90 characters at a word boundary
+with "…". The result is stored in `posts.monkey_thought` (nullable column, added idempotently in `schema.sql`), so each
+post costs at most one successful Groq call ever; concurrent requests for the same post share one call, and a post whose
+call failed isn't retried for 10 minutes. If AI is off (no `GROQ_API_KEY`), Groq fails/times out/returns nothing, the
+post has no text, or the user hit the limit (30 Groq-backed thoughts per user per 10 minutes, in memory per instance;
+`MONKEY_RATE_MAX` to override), a local fallback line is returned: ~30 cute English lines plus Hindi and Hinglish ones,
+picked by post id so it's stable. The client caches thoughts per post id (memory + `sessionStorage`) and never refetches
+while Momo just sits there. The service worker never caches `/api/monkey` (cache `zuzu-v7`).
+Optional env: `MONKEY_RATE_MAX`, `MONKEY_TIMEOUT_MS`, `MONKEY_MAX_TOKENS`. `localStorage` `zuzu.momoIdleMs` overrides the
+2-minute sleep timer (tests only).
+
 ## Local commands
     cd /workspace/xclone
     ./start.sh app        # (re)start the app in the background (logs: server.log)
@@ -173,10 +210,15 @@ or a one-time home-feed prompt. It's optional ("Skip for now" is the default).
                               #  admin dashboard with instances on :4196 (admin on) / :4197 (admin off))
     node tests/ui-test.js     # headless Chrome end-to-end flow (ZuZu AI on :4194/:4195 with the mock;
                               #  writes screenshots 12-ai-desktop.png / 13-ai-mobile.png; admin UI on :4198 -> 14-admin.png;
-                              #  ideal picker -> 15-ideal-signup.png / 16-ideal-mobile.png / 17-ideal-profile.png)
+                              #  ideal picker -> 15-ideal-signup.png / 16-ideal-mobile.png / 17-ideal-profile.png;
+                              #  Momo on :4204 with the mock -> 18-monkey-desktop.png / 19-monkey-mobile.png)
+                              # (api-test: Momo on :4201 (mock Groq) / :4202 (AI off). Mock thoughts cached in the
+                              #  local DB are cleared afterwards. Requests to the main server's /api/monkey are stubbed.)
+    node tests/monkey-demo.js # record screenshots/monkey-demo.gif + .mp4 (Momo hopping while scrolling; mock Groq on :4205;
+                              #  needs `npx playwright-core install ffmpeg` once, plus system ffmpeg)
     # Run tests with `env -u DATABASE_URL` so only the local DB from .env.local is used.
     node tests/shots.js       # regenerate screenshots/ (logs in as demo; opening DMs marks them read)
 
 ## Files
-server.js (API + static), ai.js (ZuZu AI), admin.js (admin dashboard API + /admin access), ideals.js (ideal validation/output), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
+server.js (API + static), ai.js (ZuZu AI), monkey.js (Momo's thoughts), admin.js (admin dashboard API + /admin access), ideals.js (ideal validation/output), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
 public/{index.html,style.css,app.js,ideals.js,favicon.svg,sw.js,download/ZuZu.apk}, bin/cloudflared, screenshots/.

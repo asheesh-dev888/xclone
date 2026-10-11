@@ -241,4 +241,8 @@ function register(app, { auth, h, db, postIdParam }) {
   }));
 }
 
-module.exports = { enabled, model, register, parseBody, ACTIONS, DEFAULT_MODEL, QUESTION_MAX };
+// Extra model params for reasoning models (shared with monkey.js): headroom tokens + effort settings.
+const reasoningParams = (m) => (/gpt-oss/i.test(m) ? { reasoning_effort: 'low', include_reasoning: false } : /qwen/i.test(m) ? { reasoning_effort: 'none' } : {});
+const reasoningHeadroom = (m) => (/gpt-oss|qwen/i.test(m) ? REASONING_HEADROOM : 0);
+
+module.exports = { enabled, model, baseUrl, register, parseBody, ACTIONS, DEFAULT_MODEL, QUESTION_MAX, REASONING_HEADROOM, reasoningParams, reasoningHeadroom };

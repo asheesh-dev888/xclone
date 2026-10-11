@@ -10,8 +10,18 @@ const MOCK_KEY = 'test-groq-key';
 // Behaviour is picked from the last user message:
 //   MOCK_HTTP_500 / MOCK_HTTP_429 / MOCK_HTTP_401 -> that HTTP error; MOCK_STREAM_ERROR -> a few tokens then an error event;
 //   MOCK_HANG -> never answers; MOCK_XSS -> answer with HTML/script; otherwise a markdown answer streamed in small chunks.
+// Mock thoughts for Momo (non-streaming requests): MOCK_LONG -> an over-long, quoted, multi-emoji answer; MOCK_EMPTY -> ''.
+const MOCK_THOUGHTS = [
+  'This post has main-character energy and I’m here for it 🍌',
+  'Swinging by to say this made my tail wag',
+  'Hmm, a thought worth sitting on for a while 🤔',
+  'Such cozy vibes, I might nap right here',
+  'Little post, big heart. Momo approves 🐒',
+  'Reading this twice, just for the joy of it',
+];
 function startMockGroq({ chunkDelay = 15 } = {}) {
   const calls = [];
+  let thoughtN = 0;
   const srv = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => body += c);
@@ -27,6 +37,13 @@ function startMockGroq({ chunkDelay = 15 } = {}) {
       const code = (last.match(/MOCK_HTTP_(\d{3})/) || [])[1];
       if (code) return json(+code, { error: { message: 'mock error ' + code } });
       if (/MOCK_HANG/.test(last)) return; // never answer (timeout test)
+      if (!j.stream) { // non-streaming completion (Momo the monkey's thoughts)
+        let content;
+        if (/MOCK_LONG/.test(last)) content = '"Momo: Oh wow, this is such a wonderfully long and winding post that I simply cannot stop thinking about it all day 🍌🎉🐒 truly"';
+        else if (/MOCK_EMPTY/.test(last)) content = '';
+        else content = MOCK_THOUGHTS[(thoughtN++) % MOCK_THOUGHTS.length];
+        return json(200, { id: 'mock', object: 'chat.completion', model: j.model, choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+      }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
       const chunk = (delta, finish = null) => res.write(`data: ${JSON.stringify({ id: 'mock', object: 'chat.completion.chunk', model: j.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
       const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -69,4 +86,13 @@ async function startApp({ port, ai = null, env: extra = {} }) {
   child.kill(); throw new Error('test server did not start:\n' + log);
 }
 
-module.exports = { startMockGroq, startApp, MOCK_KEY };
+// Remove mock thoughts that tests cached in the local DB (posts.monkey_thought), so the local app makes real ones later.
+async function clearMockThoughts() {
+  const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
+  const c = new Client({ connectionString: localDbUrl() });
+  await c.connect();
+  try { await c.query('UPDATE posts SET monkey_thought=NULL WHERE monkey_thought = ANY($1::text[]) OR monkey_thought LIKE $2', [MOCK_THOUGHTS, 'Oh wow, this is such a wonderfully long%']); }
+  finally { await c.end(); }
+}
+
+module.exports = { startMockGroq, startApp, MOCK_KEY, MOCK_THOUGHTS, clearMockThoughts };

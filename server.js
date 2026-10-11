@@ -10,6 +10,7 @@ const google = require('./google-auth');
 const ai = require('./ai');
 const admin = require('./admin');
 const ideals = require('./ideals');
+const monkey = require('./monkey');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -641,6 +642,9 @@ app.delete('/api/dm/messages/:id', h(async (req, res) => {
 
 // ---------- ZuZu AI (Ask about a post; Groq, streamed as SSE) ----------
 ai.register(app, { auth, h, db, postIdParam });
+
+// ---------- Momo the monkey: short cached thoughts on posts (Groq once per post, local fallback) ----------
+monkey.register(app, { auth, h, db, postIdParam });
 
 // ---------- Admin dashboard (ADMIN_USERNAMES / ADMIN_TOKEN; 404 for everyone else) ----------
 admin.register(app, { h, db, root: ROOT });

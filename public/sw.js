@@ -1,6 +1,6 @@
 // ZuZu service worker: network-first for the app shell/static files, with an offline fallback.
-// Never caches API (including direct messages under /api/dm, ZuZu AI answers under /api/ai and admin stats under /api/admin), the /admin page, auth, media uploads, app downloads (/download) or non-GET requests.
-const CACHE = 'zuzu-v6';
+// Never caches API (including direct messages under /api/dm, ZuZu AI answers under /api/ai, Momo's thoughts under /api/monkey and admin stats under /api/admin), the /admin page, auth, media uploads, app downloads (/download) or non-GET requests.
+const CACHE = 'zuzu-v7';
 // Paths that always go straight to the network and are never cached.
 const BYPASS = /^\/(api|admin|auth|media|download|healthz|\.well-known)(\/|$)/;
 const SHELL = ['/', '/style.css', '/app.js', '/ideals.js', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
@@ -24,6 +24,7 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/api/dm')) return; // DMs are private + live: never cached (also covered by BYPASS)
   if (url.pathname.startsWith('/api/admin') || url.pathname.startsWith('/admin')) return; // private admin stats/page: never cached (also covered by BYPASS)
   if (url.pathname.startsWith('/api/ai')) return; // ZuZu AI answers are streamed + per user: never cached (also covered by BYPASS)
+  if (url.pathname.startsWith('/api/monkey')) return; // Momo's thoughts: never cached by the SW (the app caches them per post itself; also covered by BYPASS)
   const isPage = req.mode === 'navigate';
   e.respondWith(
     fetch(req).then((res) => {

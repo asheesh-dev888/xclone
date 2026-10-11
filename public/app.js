@@ -185,6 +185,7 @@ function shell(center, { active = '', layout = '' } = {}) {
       ${navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
       ${state.admin ? navItem('/admin', 'admin', 'chart', null, 'Admin') : ''}
       ${navAppLink()}
+      ${momoToggleHTML(false)}
       <button class="btn btn-primary btn-big" data-action="compose">${ic('feather')}<span class="lbl">Post</span></button>
       <div class="me-chip" data-action="me-menu">${avatar(me)}<div class="who"><div style="font-weight:700">${esc(me.name)}</div><div style="color:var(--muted)">@${esc(me.username)}</div></div><span class="dots">${ic('dots')}</span></div>
     </header>
@@ -193,7 +194,7 @@ function shell(center, { active = '', layout = '' } = {}) {
         <a href="/u/${esc(me.username)}" data-link>${avatar(me, 'sm')}</a>
         <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}</a>
         ${state.admin ? `<a class="mobile-admin" href="/admin" data-link aria-label="Admin" title="Admin">${ic('chart')}</a>` : ''}
-        <button class="spacer" data-action="logout" aria-label="Log out" title="Log out">${ic('logout')}</button>
+        <div class="mt-right">${momoToggleHTML(true)}<button class="spacer" data-action="logout" aria-label="Log out" title="Log out">${ic('logout')}</button></div>
       </div>
       <div id="center">${center}</div>
     </main>
@@ -472,6 +473,7 @@ document.addEventListener('click', async (e) => {
       toast(user.ideal ? 'Your ideal: ' + user.ideal.name : 'Ideal removed');
       if (location.pathname.toLowerCase() === '/u/' + state.me.username.toLowerCase()) viewProfile(state.me.username, 'posts');
     }
+    else if (a === 'momo-toggle') momoToggle();
     else if (a === 'dismiss-app-banner') { store('localStorage', BANNER_KEY, '1'); $('#app-banner')?.remove(); }
   } catch (err) {
     el.classList.remove('pop');
@@ -1369,6 +1371,397 @@ function viewAdmin() {
   loadAdmin();
 }
 document.addEventListener('click', (e) => { if (e.target.closest('[data-action="admin-refresh"]')) loadAdmin(); });
+
+// ---------- Momo the monkey 🐒 (a playful companion that hops onto posts and shares a thought) ----------
+// Fixed to the viewport; when scrolling stops (~600 ms) it jumps in an arc onto the post nearest the centre of the
+// screen, sits on its top-right edge and shows a short thought (GET /api/monkey/thought/:id, cached per post).
+// Positions are driven by requestAnimationFrame + CSS transforms (one rect read, then one transform write, per frame).
+const MOMO_KEY = 'zuzu.momo';
+const MOMO_ROUTES = /^\/(home|explore|post\/\d+|u\/[\w.]+(?:\/(?:replies|media|likes))?)$/;
+const MOMO_POSTS = '#center article.post[data-post], #center .focus[data-post]';
+const MOMO_BLOCKERS = '#center .composer, #center .actions .act, #center .app-banner, #center .ideal-prompt'; // never covered, legs included
+const MOMO_BLOCKERS_BODY = '#center .more, #center .ai-btn'; // never covered by his body (legs are click-through)
+const MOMO_SETTLE_MS = 600, MOMO_BUBBLE_MS = 6000;
+const MOMO_IDLE_MS = () => +store('localStorage', 'zuzu.momoIdleMs') || 120000; // ~2 min (overridable for tests)
+const MOMO_LOCAL = ['Hmm, this one made me pause 🍌', 'Sending good vibes to this post', 'Swinging by to say: nice one! 🐒', 'Perched here, pondering this one', 'Monkey see, monkey smile 😊'];
+const MOMO_TAP = ['Ooh, that tickles! 🐒', 'Got any bananas? 🍌', 'I’m just a little monkey with big thoughts', 'Hi there! Keep scrolling, I’ll keep hopping', 'Wheee! Posts are my jungle gym', 'Tap the bubble to ask ZuZu AI about this post'];
+const momoOn = () => store('localStorage', MOMO_KEY) !== '0';
+const momo = {
+  el: null, bubble: null, textEl: null, built: false, active: false,
+  x: 0, y: 0, rot: 0, W: 60, H: 72, placed: false,
+  post: null, postId: 0, st: 'hidden', flight: null, raf: 0,
+  scrolling: false, lastHop: 0, lastActivity: Date.now(), band: null,
+  thoughts: new Map(), loading: new Map(), shownAt: new Map(), bubbleKind: '', timers: {}, io: null, visible: new Set(), idleIv: 0,
+};
+try { const saved = JSON.parse(sessionStorage.getItem('zuzu.momoThoughts') || '[]'); saved.forEach(([k, v]) => momo.thoughts.set(k, v)); } catch {}
+const momoReduced = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const momoToggleHTML = (mobile) => mobile
+  ? `<button class="momo-mtoggle" data-action="momo-toggle" aria-pressed="${momoOn()}" aria-label="Show Momo 🐒" title="Show Momo 🐒">🐒</button>`
+  : `<button class="nav-item nav-momo" data-action="momo-toggle" aria-pressed="${momoOn()}" title="Show Momo 🐒"><span class="momo-switch" aria-hidden="true"><span></span></span><span class="lbl">Show Momo 🐒</span></button>`;
+
+const MOMO_SVG = `<svg class="momo-svg" viewBox="0 0 100 120" aria-hidden="true">
+  <ellipse class="m-shadow" cx="50" cy="117" rx="22" ry="3"/>
+  <g class="m-tail"><path d="M64 94C86 98 99 80 91 65C86 56 76 59 80 67" fill="none" stroke="#7b4a26" stroke-width="5" stroke-linecap="round"/></g>
+  <g class="m-legs">
+    <g class="m-leg m-leg-l"><path d="M42 92L40 107" stroke="#8b5a2b" stroke-width="7.5" stroke-linecap="round"/><ellipse cx="38.5" cy="110.5" rx="5.8" ry="3.8" fill="#e9c49a"/></g>
+    <g class="m-leg m-leg-r"><path d="M58 92L60 107" stroke="#8b5a2b" stroke-width="7.5" stroke-linecap="round"/><ellipse cx="61.5" cy="110.5" rx="5.8" ry="3.8" fill="#e9c49a"/></g>
+  </g>
+  <g class="m-torso">
+    <ellipse cx="50" cy="79" rx="21" ry="18.5" fill="#8b5a2b"/>
+    <ellipse cx="50" cy="83" rx="13" ry="12.5" fill="#e9c49a"/>
+    <g class="m-arm-l"><path d="M32 71Q25 84 34 93" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="35" cy="94" r="4.2" fill="#e9c49a"/></g>
+    <g class="m-arm-r"><path d="M68 71Q75 84 66 93" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="65" cy="94" r="4.2" fill="#e9c49a"/></g>
+  </g>
+  <g class="m-head">
+    <circle cx="25" cy="40" r="9.5" fill="#8b5a2b"/><circle cx="25" cy="40" r="5.2" fill="#e9c49a"/>
+    <circle cx="75" cy="40" r="9.5" fill="#8b5a2b"/><circle cx="75" cy="40" r="5.2" fill="#e9c49a"/>
+    <circle cx="50" cy="38" r="24" fill="#8b5a2b"/>
+    <path d="M45 15.5q4-7 9-1" stroke="#8b5a2b" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <path d="M50 30C41 22 30 29 34 40C30 50 38 58.5 50 58.5C62 58.5 70 50 66 40C70 29 59 22 50 30Z" fill="#e9c49a"/>
+    <g class="m-eyes"><ellipse cx="43" cy="38.5" rx="3.3" ry="4.3" fill="#2b1a0e"/><ellipse cx="57" cy="38.5" rx="3.3" ry="4.3" fill="#2b1a0e"/><circle cx="44.3" cy="36.8" r="1.25" fill="#fff"/><circle cx="58.3" cy="36.8" r="1.25" fill="#fff"/></g>
+    <g class="m-eyes-closed"><path d="M39.5 39q3.5 3.2 7 0M53.5 39q3.5 3.2 7 0" stroke="#2b1a0e" stroke-width="1.9" fill="none" stroke-linecap="round"/></g>
+    <circle cx="36.5" cy="47" r="3.6" fill="#ff8fa3" opacity=".5"/><circle cx="63.5" cy="47" r="3.6" fill="#ff8fa3" opacity=".5"/>
+    <ellipse cx="48" cy="46" rx="1.1" ry="1.4" fill="#5a3415"/><ellipse cx="52" cy="46" rx="1.1" ry="1.4" fill="#5a3415"/>
+    <path class="m-mouth" d="M44 50.5Q50 55.8 56 50.5" stroke="#5a3415" stroke-width="1.9" fill="none" stroke-linecap="round"/>
+  </g>
+  <g class="m-arm-think"><path d="M68 73Q80 62 61 57.5" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="58.5" cy="57.5" r="4.6" fill="#e9c49a"/></g>
+</svg>`;
+
+function momoBuild() {
+  if (momo.built) return;
+  momo.built = true;
+  const el = momo.el = document.createElement('div');
+  el.id = 'momo'; el.className = 'momo st-idle'; el.hidden = true;
+  el.innerHTML = `<div class="momo-bubble" hidden><div class="mb-cloud" data-momo="bubble"><i class="pf p1"></i><i class="pf p2"></i><i class="pf p3"></i><i class="pf p4"></i><i class="pf p5"></i><span class="mb-ic" aria-hidden="true">💬</span><span class="mb-text" aria-live="polite"></span></div><i class="mb-dot d1"></i><i class="mb-dot d2"></i><i class="mb-dot d3"></i></div>
+    <div class="momo-fig" data-momo="monkey" role="button" tabindex="0" aria-label="Momo the monkey. Tap for a thought">${MOMO_SVG}</div>`;
+  document.body.appendChild(el);
+  momo.bubble = $('.momo-bubble', el); momo.textEl = $('.mb-text', el);
+  el.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-momo]'); if (!t) return;
+    e.preventDefault(); e.stopPropagation();
+    if (t.dataset.momo === 'bubble') momoBubbleTap(); else momoTap();
+  });
+  el.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-momo]')) { e.preventDefault(); e.target.closest('[data-momo]').click(); }
+  });
+  momo.io = new IntersectionObserver((entries) => {
+    for (const en of entries) {
+      if (en.isIntersecting) momo.visible.add(en.target); else momo.visible.delete(en.target);
+      // Its post left the view: hop to the next one (right away if the page is still, else while/after scrolling).
+      if (en.target === momo.post && !en.isIntersecting && momo.active && !momo.flight && !momo.scrolling) momoSettle();
+    }
+  }, { rootMargin: '-40px 0px -40px 0px' });
+}
+function momoSetState(s) {
+  if (momo.st === s) return;
+  momo.el.classList.remove('st-' + momo.st);
+  momo.st = s;
+  momo.el.classList.add('st-' + s);
+  momo.el.dataset.state = s;
+}
+function momoPlace(x, y, rot = 0) {
+  momo.x = x; momo.y = y; momo.rot = rot; momo.placed = true;
+  momo.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)${rot ? ` rotate(${rot.toFixed(1)}deg)` : ''}`;
+}
+function momoMeasure() {
+  const svg = $('.momo-svg', momo.el), r = svg.getBoundingClientRect();
+  if (r.height) { momo.W = r.width; momo.H = r.height; }
+  const head = $('#center .header'), hb = head ? head.getBoundingClientRect().bottom : 0;
+  const mobile = innerWidth <= 700;
+  momo.band = { head: Math.max(0, hb), top: Math.max(0, hb) + momo.H * 0.8 + 4, bottom: innerHeight - (mobile ? 56 + 16 : 16) - momo.H * 0.25, mobile };
+}
+const momoSeat = () => momo.H * 96 / 120; // where the seat line is inside the 100x120 drawing
+// Sit on the top-right corner: the dangling legs end at the post's right edge (clear of the ⋯ / AI buttons);
+// on narrow screens he stays fully on screen (the legs are click-through there).
+// If the corner would cover a button (e.g. the previous post's Share on mobile), he shifts left a little (momoShift).
+const momoShift = new WeakMap();
+const momoRect = (el) => (el.closest('.repost-wrap') || el).getBoundingClientRect(); // reposts: sit on the "X reposted" card's top edge
+function momoAnchor(r, el) { return { x: Math.min(r.right - momo.W * 0.62, innerWidth - momo.W - 2) - ((el && momoShift.get(el)) || 0), y: r.top - momoSeat() }; }
+function momoHomeSpot() {
+  const main = $('.main'), right = main ? Math.min(main.getBoundingClientRect().right, innerWidth) : innerWidth;
+  return momo.band.mobile
+    ? { x: innerWidth - momo.W - 22, y: innerHeight - 132 - 10 - momo.H } // above the floating Post button
+    : { x: Math.min(right - momo.W * 0.45, innerWidth - momo.W - 8), y: innerHeight - momo.H - 16 }; // on the main column's right border
+}
+// The post nearest the viewport centre whose top edge is in view and where Momo covers no buttons / composer.
+function momoPick(exclude) {
+  const vh = innerHeight, mid = vh / 2, band = momo.band;
+  const pool = momo.visible.size ? [...momo.visible] : $$(MOMO_POSTS);
+  const rects = (sel) => $$(sel).map(b => b.getBoundingClientRect()).filter(r => r.width && r.bottom > 0 && r.top < vh);
+  const blockers = rects(MOMO_BLOCKERS), bodyBlockers = rects(MOMO_BLOCKERS_BODY);
+  const hit = (b, box) => b.right > box.l + 1 && b.left < box.r - 1 && b.bottom > box.t + 1 && b.top < box.b - 1;
+  let best = null, bestD = Infinity;
+  for (const el of pool) {
+    if (!el.isConnected || el === exclude) continue;
+    const r = momoRect(el);
+    if (r.top < band.top || r.top > band.bottom || r.height < 40) continue;
+    const a = momoAnchor(r);
+    let shift = -1;
+    for (let dx = 0; dx <= 160; dx += 8) {
+      const x = a.x - dx, box = { l: x + momo.W * 0.12, r: x + momo.W * 0.96, t: a.y, b: a.y + momo.H }, body = { ...box, b: a.y + momoSeat() };
+      if (x < r.left + 60) break;
+      if (!blockers.some(b => hit(b, box)) && !bodyBlockers.some(b => hit(b, body))) { shift = dx; break; }
+    }
+    if (shift < 0) continue;
+    const d = Math.abs(r.top + Math.min(r.height, vh) / 2 - mid);
+    if (d < bestD) { bestD = d; best = el; momoShift.set(el, shift); }
+  }
+  return best;
+}
+function momoLoop() { if (!momo.raf && momo.active) momo.raf = requestAnimationFrame(momoTick); }
+function momoTick(now) {
+  momo.raf = 0;
+  if (!momo.active) return;
+  let more = false;
+  if (momo.flight) more = momoFlightStep(now);
+  else if (momo.post) {
+    if (!momo.post.isConnected) { momo.post = null; momo.postId = 0; momoSettleSoon(); }
+    else {
+      const r = momoRect(momo.post), a = momoAnchor(r, momo.post), band = momo.band;
+      const lost = r.top < band.top - 2 || r.top > band.bottom + 2;
+      // Ride along with the post; if it scrolls out of view, cling to the screen edge and hop to the next one.
+      const y = Math.min(Math.max(a.y, band.head + 2), band.bottom - momoSeat());
+      momoPlace(a.x, y);
+      if (lost && momo.scrolling && now - momo.lastHop > 700) {
+        const next = momoPick(momo.post);
+        if (next) momoJump(next);
+      }
+      more = momo.scrolling || !!momo.flight;
+    }
+  }
+  if (more) momoLoop();
+}
+function momoJump(el) {
+  momo.lastHop = performance.now();
+  momoHideBubble(true);
+  momo.post = el; momo.postId = +el.dataset.post;
+  momo.el.dataset.post = String(momo.postId);
+  clearTimeout(momo.timers.land); clearTimeout(momo.timers.think);
+  if (momoReduced()) {
+    // Reduced motion: fade out, move, fade in (no arc, no squash).
+    momo.flight = null;
+    momoSetState('fade');
+    momo.el.classList.add('fading');
+    clearTimeout(momo.timers.fade);
+    momo.timers.fade = setTimeout(() => {
+      if (!momo.active || momo.post !== el || !el.isConnected) return;
+      const a = momoAnchor(momoRect(el), el);
+      momoPlace(a.x, a.y);
+      momo.el.classList.remove('fading');
+      momoLanded();
+    }, 240);
+    return;
+  }
+  momoSetState('crouch');
+  momo.flight = { el, t0: performance.now() + 150, fx: momo.x, fy: momo.y, dur: 0 };
+  momoLoop();
+}
+function momoFlightStep(now) {
+  const f = momo.flight;
+  if (!f.el.isConnected) { momo.flight = null; momo.post = null; momo.postId = 0; momoSetState('idle'); momoSettleSoon(); return false; }
+  if (now < f.t0) return true; // crouching before the jump
+  const a = momoAnchor(momoRect(f.el), f.el); // live target: follows the post if the page scrolls mid-jump
+  if (!f.dur) {
+    const dx = a.x - f.fx, dy = a.y - f.fy, dist = Math.hypot(dx, dy);
+    f.dur = Math.min(820, Math.max(430, 360 + dist * 0.6));
+    f.peak = Math.min(150, 46 + dist * 0.22) + Math.max(0, -dy) * 0.12;
+    f.dir = dx < 0 ? -1 : 1;
+    momoSetState('jump');
+  }
+  const p = Math.min(1, (now - f.t0) / f.dur);
+  const ex = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+  const x = f.fx + (a.x - f.fx) * ex;
+  const y = f.fy + (a.y - f.fy) * p - f.peak * 4 * p * (1 - p);
+  if (p >= 1) { momo.flight = null; momoPlace(a.x, a.y); momoLanded(); return momo.scrolling; }
+  momoPlace(x, Math.max(-momo.H * 0.5, y), f.dir * 14 * (1 - 2 * p));
+  return true;
+}
+function momoLanded() {
+  momoSetState(momoReduced() ? 'sit' : 'land');
+  clearTimeout(momo.timers.land);
+  momo.timers.land = setTimeout(() => {
+    if (!momo.active || momo.flight) return;
+    momoSetState('sit');
+    const id = momo.postId, last = momo.shownAt.get(id) || 0;
+    if (id && Date.now() - last > 60000) momoThink(id); // don't repeat the same thought while it just sits there
+  }, momoReduced() ? 0 : 240);
+}
+async function momoThought(id) {
+  if (momo.thoughts.has(id)) return momo.thoughts.get(id);
+  if (!momo.loading.has(id)) {
+    momo.loading.set(id, (async () => {
+      try {
+        const r = await fetch('/api/monkey/thought/' + id, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const { thought } = await r.json();
+        if (typeof thought !== 'string' || !thought) throw new Error('empty');
+        momo.thoughts.set(id, thought);
+        try { sessionStorage.setItem('zuzu.momoThoughts', JSON.stringify([...momo.thoughts].slice(-200))); } catch {}
+        return thought;
+      } catch { return MOMO_LOCAL[id % MOMO_LOCAL.length]; } finally { momo.loading.delete(id); }
+    })());
+  }
+  return momo.loading.get(id);
+}
+async function momoThink(id) {
+  momoSetState('think');
+  const t0 = Date.now();
+  const text = await momoThought(id);
+  const wait = Math.max(0, 650 - (Date.now() - t0)); // a little "hmm…" with the hand on its chin
+  clearTimeout(momo.timers.think);
+  momo.timers.think = setTimeout(() => {
+    if (!momo.active || momo.postId !== id || momo.flight || momo.st === 'sleep') return;
+    momo.shownAt.set(id, Date.now());
+    momoShowBubble(text, 'thought');
+  }, wait);
+}
+function momoShowBubble(text, kind) {
+  const b = momo.bubble;
+  clearTimeout(momo.timers.bubble); clearTimeout(momo.timers.bubbleOut);
+  momo.bubbleKind = kind;
+  b.classList.remove('out', 'side');
+  b.classList.toggle('zzz', kind === 'sleep');
+  b.classList.toggle('can-ask', kind === 'thought' && !!state.config.ai);
+  momo.textEl.textContent = text;
+  const cloud = $('.mb-cloud', b);
+  if (kind === 'thought' && state.config.ai) { cloud.setAttribute('role', 'button'); cloud.tabIndex = 0; cloud.setAttribute('aria-label', text + '. Ask ZuZu AI about this post'); }
+  else { cloud.removeAttribute('role'); cloud.removeAttribute('tabindex'); cloud.removeAttribute('aria-label'); }
+  b.hidden = false;
+  // Not enough room above Momo (under the header)? Put the bubble beside it instead.
+  if (momo.y - (momo.band ? momo.band.head : 0) < b.offsetHeight + 24) b.classList.add('side');
+  if (kind !== 'sleep') momo.timers.bubble = setTimeout(() => momoHideBubble(), MOMO_BUBBLE_MS);
+}
+function momoHideBubble(now) {
+  const b = momo.bubble; if (!b || b.hidden) return;
+  clearTimeout(momo.timers.bubble); clearTimeout(momo.timers.bubbleOut);
+  const done = () => { b.hidden = true; b.classList.remove('out'); momo.bubbleKind = ''; if (momo.st === 'think') momoSetState('sit'); };
+  if (now) return done();
+  b.classList.add('out');
+  momo.timers.bubbleOut = setTimeout(done, 400);
+}
+function momoTap() {
+  momoActivity(true);
+  if (!momo.active) return;
+  if (momo.st === 'sleep') return momoWake();
+  if (!momo.post || momo.flight) return momoShowBubble(momo.post ? 'Wheee! 🐒' : 'Scroll and I’ll hop onto a post! 🐒', 'tap');
+  const id = momo.postId;
+  if (momo.bubbleKind === 'thought') { // thought already showing: a new (playful) one
+    const cur = momo.textEl.textContent;
+    const pick = MOMO_TAP.filter(t => t !== cur && (state.config.ai || !/ZuZu AI/.test(t)));
+    momoShowBubble(pick[Math.floor(Math.random() * pick.length)], 'tap');
+  } else { momo.shownAt.delete(id); momoThink(id); } // show the thought again
+}
+function momoBubbleTap() {
+  if (momo.bubbleKind === 'thought' && state.config.ai && momo.postId && postCache.has(momo.postId)) {
+    const id = momo.postId;
+    momoHideBubble(true);
+    openAi(id, $('.momo-fig', momo.el));
+  } else momoHideBubble();
+}
+function momoSleep() {
+  if (!momo.active || momo.st === 'sleep' || momo.flight) return;
+  momoHideBubble(true);
+  momoSetState('sleep');
+  momoShowBubble('z z z', 'sleep');
+}
+function momoWake() {
+  if (momo.st !== 'sleep') return;
+  momoHideBubble(true);
+  momoSetState(momo.post ? 'sit' : 'idle');
+}
+function momoActivity(wake) {
+  momo.lastActivity = Date.now();
+  if (wake) momoWake();
+}
+const momoSettleSoon = (ms = MOMO_SETTLE_MS) => { clearTimeout(momo.timers.settle); momo.timers.settle = setTimeout(momoSettle, ms); };
+function momoSettle() {
+  momo.scrolling = false;
+  if (!momo.active || momo.flight || momo.st === 'sleep') return;
+  momoMeasure();
+  const best = momoPick();
+  if (best && best !== momo.post) return momoJump(best);
+  if (!best && momo.post) {
+    const r = momo.post.isConnected && momoRect(momo.post);
+    if (r && r.top >= momo.band.top - 2 && r.top <= momo.band.bottom + 2) return; // still a fine perch
+    // Nowhere to sit: hop back to the corner.
+    momo.post = null; momo.postId = 0; momo.el.dataset.post = '';
+    momoHideBubble(true);
+    const h = momoHomeSpot(); momoPlace(h.x, h.y); momoSetState('idle');
+  }
+}
+function momoOnScroll() {
+  if (!momo.active) return;
+  momoActivity(true);
+  momo.scrolling = true;
+  momoLoop();
+  momoSettleSoon();
+}
+function momoAllowed() {
+  return momoOn() && !!state.me && MOMO_ROUTES.test(location.pathname) && !document.hidden
+    && !document.body.classList.contains('ai-open') && !$('#modal-root').childElementCount;
+}
+function momoActivate() {
+  momoBuild();
+  momo.active = true;
+  momo.el.hidden = false;
+  momo.el.classList.remove('paused');
+  momoMeasure();
+  momo.lastActivity = Date.now();
+  if (momo.post && momo.post.isConnected) { const a = momoAnchor(momoRect(momo.post), momo.post); momoPlace(a.x, a.y); momoSetState('sit'); }
+  else { momo.post = null; momo.postId = 0; momo.el.dataset.post = ''; const h = momoHomeSpot(); momoPlace(h.x, h.y); momoSetState('idle'); }
+  momoObserve();
+  momoSettleSoon(700);
+  clearInterval(momo.idleIv);
+  momo.idleIv = setInterval(() => { if (momo.active && Date.now() - momo.lastActivity > MOMO_IDLE_MS()) momoSleep(); }, Math.min(5000, MOMO_IDLE_MS() / 3));
+}
+function momoDeactivate() {
+  momo.active = false;
+  if (momo.raf) cancelAnimationFrame(momo.raf);
+  momo.raf = 0; momo.flight = null; momo.scrolling = false;
+  Object.values(momo.timers).forEach(clearTimeout);
+  clearInterval(momo.idleIv);
+  if (!momo.el) return;
+  momoHideBubble(true);
+  momo.el.classList.remove('fading');
+  momo.el.hidden = true;
+  momo.el.classList.add('paused');
+  momoSetState('hidden');
+}
+function momoObserve() {
+  if (!momo.io) return;
+  for (const el of [...momo.visible]) if (!el.isConnected) { momo.visible.delete(el); momo.io.unobserve(el); }
+  $$(MOMO_POSTS).forEach(el => { if (!el.dataset.momoObs) { el.dataset.momoObs = '1'; momo.io.observe(el); } });
+}
+let momoSyncRaf = 0;
+function momoSync() {
+  if (momoSyncRaf) return;
+  momoSyncRaf = requestAnimationFrame(() => {
+    momoSyncRaf = 0;
+    const ok = momoAllowed();
+    if (ok && !momo.active) momoActivate();
+    else if (!ok && momo.active) momoDeactivate();
+    else if (ok) {
+      momoObserve();
+      if (momo.post && !momo.post.isConnected) { momo.post = null; momo.postId = 0; momo.el.dataset.post = ''; momoHideBubble(true); if (!momo.flight) momoSetState('idle'); }
+      if (!momo.post && !momo.flight && momo.st !== 'sleep') momoSettleSoon();
+    }
+  });
+}
+function momoToggle() {
+  const on = !momoOn();
+  store('localStorage', MOMO_KEY, on ? '1' : '0');
+  $$('[data-action="momo-toggle"]').forEach(b => b.setAttribute('aria-pressed', String(on)));
+  momoSync();
+  toast(on ? 'Momo is back! 🐒' : 'Momo is taking a break. Turn him back on anytime.');
+}
+addEventListener('scroll', momoOnScroll, { passive: true });
+addEventListener('resize', () => { if (momo.active) { momoMeasure(); momoSettleSoon(200); } }, { passive: true });
+['pointerdown', 'keydown'].forEach(t => addEventListener(t, () => momoActivity(false), { passive: true, capture: true }));
+document.addEventListener('visibilitychange', momoSync); // no work at all while the tab is hidden
+new MutationObserver(momoSync).observe(document.getElementById('app'), { childList: true, subtree: true });
+new MutationObserver(momoSync).observe(document.getElementById('modal-root'), { childList: true });
+new MutationObserver(momoSync).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+addEventListener('popstate', momoSync);
 
 // ---------- boot ----------
 async function refreshMe() {

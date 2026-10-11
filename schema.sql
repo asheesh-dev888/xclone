@@ -131,3 +131,6 @@ CREATE INDEX IF NOT EXISTS dm_messages_created ON dm_messages(created_at);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ideal_name TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ideal_preset_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ideal_qualities TEXT[];
+
+-- Momo the monkey: one short cached reflection per post (generated once by Groq, NULL until then).
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS monkey_thought TEXT;
