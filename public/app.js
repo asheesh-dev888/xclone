@@ -681,7 +681,7 @@ function viewAuth(mode) {
       <div class="or"><span>or</span></div>` : ''}
       <form data-form="auth" data-mode="${mode}" autocomplete="on">
         ${signup ? `<div class="field"><label>Name</label><input name="name" maxlength="50" autocomplete="name"></div>` : ''}
-        <div class="field"><label>Username</label><input name="username" required autocapitalize="none" autocomplete="username" ${signup ? 'placeholder="e.g. akhil_rajan" autocorrect="off" spellcheck="false"' : ''}></div>
+        <div class="field"><label>Username</label><input name="username" required autocapitalize="none" autocomplete="username" ${signup ? 'placeholder="your_handle" autocorrect="off" spellcheck="false"' : ''}></div>
         <div class="field"><label>Password</label><input name="password" type="password" required ${signup ? 'minlength="6" autocomplete="new-password"' : 'autocomplete="current-password"'}></div>
         ${signup ? idealPicker('signup-ideal', null) : ''}
         <button class="btn btn-light" type="submit">${signup ? 'Create account' : 'Log in'}</button>
