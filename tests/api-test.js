@@ -15,6 +15,7 @@ function client() {
   return c;
 }
 (async () => {
+  if (process.env.API_ONLY === 'admin') { await adminTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'batchd') { await batchDTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'batchc') { await batchCTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'push') { await pushTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
@@ -557,6 +558,18 @@ async function adminTests() {
     ok(r.status === 200 && typeof r.data.users.total === 'number' && r.data.timezone === 'Asia/Kolkata', 'admin username: GET /api/admin/stats -> 200');
     ok(/no-store/.test(r.headers.get('cache-control') || ''), 'stats are Cache-Control: no-store');
     ok(r.data.ai_requests_today === undefined, 'AI requests not reported (not tracked)');
+    // admin password reset (token only)
+    const victim = mk(on.url), vname = 'admreset' + rnd;
+    await victim('POST', '/api/signup', { username: vname, password: 'oldpass123' }); made.push(vname);
+    r = await anon('POST', `/api/admin/users/${vname}/reset-password`, {}, bearer('nope')); ok(r.status === 404, 'reset-password: wrong token -> 404');
+    r = await adm('POST', `/api/admin/users/${vname}/reset-password`); ok(r.status === 404, 'reset-password: admin session without the token -> 404');
+    r = await anon('POST', `/api/admin/users/nobody_${rnd}/reset-password`, {}, bearer(TOKEN)); ok(r.status === 404 && r.data.error === 'User not found', 'reset-password: unknown user -> 404');
+    r = await anon('POST', `/api/admin/users/${vname.toUpperCase()}/reset-password`, {}, bearer(TOKEN));
+    const temp = r.data.temp_password;
+    ok(r.status === 200 && /^[A-Za-z0-9]{12}$/.test(temp || '') && /no-store/.test(r.headers.get('cache-control') || ''), 'reset-password: 12-char temp password (no-store)');
+    ok((await victim('GET', '/api/me')).data.user === null, 'reset-password: user signed out everywhere');
+    ok((await mk(on.url)('POST', '/api/login', { username: vname, password: 'oldpass123' })).status === 401, 'reset-password: old password no longer works');
+    ok((await mk(on.url)('POST', '/api/login', { username: vname, password: temp })).status === 200, 'reset-password: temp password logs in');
     r = await adm('GET', '/admin'); ok(r.status === 200 && /app\.js/.test(r.text) && /no-store/.test(r.headers.get('cache-control') || ''), 'admin username: /admin page -> 200 (no-store)');
     r = await adm('GET', '/api/admin/other'); ok(r.status === 404, 'unknown /api/admin path -> 404');
     // bearer token

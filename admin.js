@@ -140,6 +140,27 @@ function register(app, { h, db, root }) {
     }
     res.json(await stats(db, { since }));
   }));
+  // Admin password reset (ADMIN_TOKEN only): sets a random 12-char temporary password, signs the user out everywhere,
+  // returns the temp password once. Rate-limited (all calls, incl. bad tokens) to ADMIN_RESET_RATE_MAX per hour.
+  const resetHits = [];
+  app.post('/api/admin/users/:username/reset-password', h(async (req, res) => {
+    const t = Date.now();
+    while (resetHits.length && t - resetHits[0] > 3600e3) resetHits.shift();
+    if (resetHits.length >= (parseInt(process.env.ADMIN_RESET_RATE_MAX || '', 10) || 10)) { res.set('Retry-After', '3600'); return res.status(429).json({ error: 'Too many requests' }); }
+    resetHits.push(t);
+    if (!tokenOk(req.headers.authorization)) return NOT_FOUND(res);
+    const u = await db.get('SELECT id, username FROM users WHERE lower(username)=lower($1)', [String(req.params.username).replace(/^@/, '')]);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    const A = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    let temp = ''; while (temp.length < 12) { const b = crypto.randomBytes(1)[0]; if (b < 216) temp += A[b % 54]; }
+    const bcrypt = require('bcryptjs');
+    await db.tx(async (c) => {
+      await db.run('UPDATE users SET password_hash=$1 WHERE id=$2', [bcrypt.hashSync(temp, 10), u.id], c);
+      await db.run('DELETE FROM sessions WHERE user_id=$1', [u.id], c);
+    });
+    console.log(`admin: temporary password set for @${u.username}`);
+    res.json({ ok: true, username: u.username, temp_password: temp, sessions_cleared: true });
+  }));
   // Every other /api/admin path: 404 for everyone (falls through to the API 404 handler).
   app.get('/admin', noStore, (req, res) => {
     if (!isAdminUser(req.user)) return res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><title>Not found</title><body style="background:#000;color:#e7e9ea;font-family:sans-serif;text-align:center;padding:60px">Not found · <a style="color:#1d9bf0" href="/home">ZuZu</a></body>');
