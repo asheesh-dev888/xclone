@@ -118,7 +118,7 @@ BEGIN
                  WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'is_demo') THEN
     ALTER TABLE users ADD COLUMN is_demo BOOLEAN NOT NULL DEFAULT FALSE;
     UPDATE users SET is_demo = TRUE WHERE google_id IS NULL AND lower(username) IN
-      ('demo', 'akhil', 'priya_codes', 'rahul_cricket', 'spacenerd', 'foodie_arjun', 'newsbot', 'design_ananya');
+      ('demo', 'zuzu_builder', 'priya_codes', 'rahul_cricket', 'spacenerd', 'foodie_arjun', 'newsbot', 'design_ananya');
   END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS users_created ON users(created_at);
@@ -252,3 +252,9 @@ CREATE TABLE IF NOT EXISTS story_views(
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   viewed_at BIGINT NOT NULL,
   PRIMARY KEY (story_id, user_id));
+
+-- Rename the old demo account to a neutral one (idempotent; only the seeded demo row, never a real account).
+UPDATE users SET username = 'zuzu_builder', name = 'ZuZu Builder',
+  bio = CASE WHEN bio = 'Builder. Curious about everything.' THEN 'Building ZuZu in public. Say hi!' ELSE bio END
+WHERE lower(username) = 'akhil' AND is_demo AND google_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM users WHERE lower(username) = 'zuzu_builder');

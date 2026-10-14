@@ -26,7 +26,7 @@ const OUT = require('path').join(__dirname, '..', 'screenshots');
   await p.click('.dm-conv:has-text("@priya_codes")'); await p.waitForSelector('.msg'); await p.waitForTimeout(500);
   await p.screenshot({ path: OUT + '/10-dm-desktop.png' });
   await mp.goto(BASE + '/messages'); await mp.waitForSelector('.dm-conv');
-  await mp.click('.dm-conv:has-text("@akhil")'); await mp.waitForSelector('.msg'); await mp.waitForTimeout(500);
+  await mp.click('.dm-conv:has-text("@zuzu_builder")'); await mp.waitForSelector('.msg'); await mp.waitForTimeout(500);
   await mp.screenshot({ path: OUT + '/11-dm-mobile.png' });
   await b.close(); console.log('saved to', OUT);
 })().catch(e => { console.error(e); process.exit(1); });

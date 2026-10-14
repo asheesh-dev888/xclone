@@ -540,7 +540,7 @@ async function dmShots(browser, loggedIn, step) {
   const m = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: loggedIn });
   const mp = await m.newPage();
   await mp.goto(BASE + '/messages'); await mp.waitForSelector('.dm-conv');
-  await mp.click('.dm-conv:has-text("@akhil")'); await mp.waitForSelector('.msg'); await mp.waitForTimeout(500);
+  await mp.click('.dm-conv:has-text("@zuzu_builder")'); await mp.waitForSelector('.msg'); await mp.waitForTimeout(500);
   await mp.screenshot({ path: OUT + '/11-dm-mobile.png' });
   await ctx.close(); await m.close();
   step('DM screenshots saved (10-dm-desktop.png, 11-dm-mobile.png)');

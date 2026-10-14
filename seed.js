@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 
 const users = [
   ['demo', 'Demo User', 'Just trying out ZuZu 👋', 'Bengaluru, India'],
-  ['akhil', 'Akhil Rajan', 'Builder. Curious about everything.', 'India'],
+  ['zuzu_builder', 'ZuZu Builder', 'Building ZuZu in public. Say hi!', 'India'],
   ['priya_codes', 'Priya Sharma', 'Full-stack dev · chai enthusiast ☕ · open source', 'Pune'],
   ['rahul_cricket', 'Rahul Verma', 'Cricket, stats and hot takes 🏏', 'Mumbai'],
   ['spacenerd', 'Meera Iyer', 'Astrophysics PhD student. Stars > people (mostly).', 'Chennai'],
@@ -19,14 +19,14 @@ const posts = [
   ['foodie_arjun', 'Rainy evening + masala chai + pakoras = perfection. Fight me. ☔', 460],
   ['newsbot', 'Morning brief: markets open flat, monsoon withdraws from north-west India, and a new metro line opens for trials. (demo content)', 420],
   ['design_ananya', 'Hot take: dark mode isn’t just black backgrounds. Contrast, elevation and borders do the heavy lifting. #design', 380],
-  ['akhil', 'Building ZuZu from scratch to see how hard it really is. So far: surprisingly fun.', 340],
+  ['zuzu_builder', 'Building ZuZu from scratch to see how hard it really is. So far: surprisingly fun.', 340],
   ['priya_codes', 'Reminder: hash your passwords. bcrypt, argon2, scrypt — pick one. Never store plain text. #security', 300],
   ['spacenerd', 'Clear skies tonight! Saturn is visible right after sunset if you look south-east 🪐', 260],
   ['rahul_cricket', 'Unpopular opinion: Test cricket is still the best format. Five days of chess on grass.', 220],
   ['design_ananya', 'Spent 3 hours choosing between two shades of grey. Designer life. #design', 180],
   ['foodie_arjun', 'Best dosa I’ve ever had was at a tiny stall near the bus stand. No name, no signboard, just magic.', 140],
   ['demo', 'Hello world! This is my first post on ZuZu 🎉', 100],
-  ['akhil', 'Feature request list for ZuZu: bookmarks, DMs, polls. What else? #buildinpublic', 60],
+  ['zuzu_builder', 'Feature request list for ZuZu: bookmarks, DMs, polls. What else? #buildinpublic', 60],
   ['newsbot', 'Evening brief: tech stocks up, a new space mission announced, and weekend weather looks clear. (demo content)', 30],
 ];
 
@@ -47,7 +47,7 @@ async function seed(client) {
     pid[i] = (await one('INSERT INTO posts(user_id,text,created_at) VALUES ($1,$2,$3) RETURNING id', [ids[u], t, T0 - minsAgo * 60000])).id;
   }
   const reply = (u, i, t, minsAgo) => one('INSERT INTO posts(user_id,text,parent_id,created_at) VALUES ($1,$2,$3,$4) RETURNING id', [ids[u], t, pid[i], T0 - minsAgo * 60000]);
-  await reply('akhil', 0, 'Agreed. WAL mode + a single box gets you really far.', 590);
+  await reply('zuzu_builder', 0, 'Agreed. WAL mode + a single box gets you really far.', 590);
   await reply('demo', 0, 'What did you build?', 580);
   await reply('priya_codes', 2, 'Wait, really?? Mind blown.', 490);
   await reply('spacenerd', 2, '243 Earth days per rotation vs 225 per orbit 😄', 485);
@@ -56,34 +56,34 @@ async function seed(client) {
   await reply('design_ananya', 12, 'Welcome aboard!', 90);
   const follow = (a, b) => client.query('INSERT INTO follows VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [ids[a], ids[b], T0 - 864e5]);
   const follows = [
-    ...['akhil', 'priya_codes', 'spacenerd', 'design_ananya'].map(u => ['demo', u]),
-    ...['priya_codes', 'rahul_cricket', 'spacenerd', 'foodie_arjun', 'design_ananya'].map(u => [u, 'akhil']),
-    ...['priya_codes', 'spacenerd', 'design_ananya'].map(u => ['akhil', u]),
+    ...['zuzu_builder', 'priya_codes', 'spacenerd', 'design_ananya'].map(u => ['demo', u]),
+    ...['priya_codes', 'rahul_cricket', 'spacenerd', 'foodie_arjun', 'design_ananya'].map(u => [u, 'zuzu_builder']),
+    ...['priya_codes', 'spacenerd', 'design_ananya'].map(u => ['zuzu_builder', u]),
     ...['rahul_cricket', 'foodie_arjun', 'spacenerd'].map(u => [u, 'priya_codes']),
-    ...['priya_codes', 'akhil'].map(u => [u, 'demo']),
+    ...['priya_codes', 'zuzu_builder'].map(u => [u, 'demo']),
     ['design_ananya', 'spacenerd'], ['foodie_arjun', 'rahul_cricket'],
   ];
   for (const [a, b] of follows) await follow(a, b);
-  const likes = [[0, ['akhil', 'demo', 'spacenerd', 'design_ananya', 'rahul_cricket']], [2, ['priya_codes', 'akhil', 'demo', 'foodie_arjun']], [3, ['rahul_cricket', 'priya_codes']],
-    [5, ['priya_codes', 'akhil', 'spacenerd']], [6, ['priya_codes', 'demo', 'design_ananya']], [8, ['akhil', 'design_ananya']], [12, ['akhil', 'priya_codes']], [13, ['priya_codes']]];
+  const likes = [[0, ['zuzu_builder', 'demo', 'spacenerd', 'design_ananya', 'rahul_cricket']], [2, ['priya_codes', 'zuzu_builder', 'demo', 'foodie_arjun']], [3, ['rahul_cricket', 'priya_codes']],
+    [5, ['priya_codes', 'zuzu_builder', 'spacenerd']], [6, ['priya_codes', 'demo', 'design_ananya']], [8, ['zuzu_builder', 'design_ananya']], [12, ['zuzu_builder', 'priya_codes']], [13, ['priya_codes']]];
   for (const [i, us] of likes) for (const u of us) await client.query('INSERT INTO likes VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [ids[u], pid[i], T0 - 3600000]);
   const repost = (u, i, minsAgo) => client.query('INSERT INTO posts(user_id,text,repost_of,created_at) VALUES ($1,$2,$3,$4)', [ids[u], '', pid[i], T0 - minsAgo * 60000]);
-  await repost('akhil', 7, 290); await repost('spacenerd', 5, 170); await repost('priya_codes', 13, 50);
+  await repost('zuzu_builder', 7, 290); await repost('spacenerd', 5, 170); await repost('priya_codes', 13, 50);
   const notif = (to, from, type, i, m) => client.query('INSERT INTO notifications(user_id,actor_id,type,post_id,created_at) VALUES ($1,$2,$3,$4,$5)', [ids[to], ids[from], type, i == null ? null : pid[i], T0 - m * 60000]);
-  await notif('demo', 'akhil', 'like', 12, 80); await notif('demo', 'priya_codes', 'like', 12, 70);
-  await notif('demo', 'priya_codes', 'follow', null, 1440); await notif('demo', 'akhil', 'follow', null, 1400);
+  await notif('demo', 'zuzu_builder', 'like', 12, 80); await notif('demo', 'priya_codes', 'like', 12, 70);
+  await notif('demo', 'priya_codes', 'follow', null, 1440); await notif('demo', 'zuzu_builder', 'follow', null, 1400);
   console.log('Seeded', users.length, 'users,', posts.length, 'posts. Login: demo / demo1234 (all demo users share this password)');
   return true;
 }
 // Demo DMs: added only when there are no DM conversations at all and the demo users exist.
 // Never touches existing data. [user, text, minutesAgo] per message; readUpTo = minutes-ago each side has read up to.
 const dms = [
-  { pair: ['akhil', 'demo'], msgs: [
-    ['akhil', 'Hey! Welcome to ZuZu 👋', 300],
+  { pair: ['zuzu_builder', 'demo'], msgs: [
+    ['zuzu_builder', 'Hey! Welcome to ZuZu 👋', 300],
     ['demo', 'Thanks! Loving it so far.', 295],
-    ['akhil', 'DMs just shipped. Tell me if anything breaks 🙏', 40],
-    ['akhil', 'Docs are here: https://zuzu-app.onrender.com', 39],
-  ], read: { akhil: 0, demo: 290 } },
+    ['zuzu_builder', 'DMs just shipped. Tell me if anything breaks 🙏', 40],
+    ['zuzu_builder', 'Docs are here: https://zuzu-app.onrender.com', 39],
+  ], read: { zuzu_builder: 0, demo: 290 } },
   { pair: ['priya_codes', 'demo'], msgs: [
     ['priya_codes', 'Saw your first post! Want to pair on a side project this weekend?', 200],
     ['demo', 'Yes! What stack?', 190],

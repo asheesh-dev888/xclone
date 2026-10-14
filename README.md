@@ -135,7 +135,7 @@ previous 6/29 IST days. Response (all `Cache-Control: no-store`):
 
 AI requests aren't counted (ZuZu AI only keeps an in-memory rate-limit window, not a daily log), so they're left out.
 Seeded demo accounts are flagged by the idempotent `users.is_demo` column: `schema.sql` adds it once and backfills the
-`seed.js` usernames (demo, akhil, priya_codes, rahul_cricket, spacenerd, foodie_arjun, newsbot, design_ananya;
+`seed.js` usernames (demo, zuzu_builder, priya_codes, rahul_cricket, spacenerd, foodie_arjun, newsbot, design_ananya;
 password accounts only), and `seed.js` sets it for new seeds. The service worker never caches `/api/admin` or `/admin`.
 
 ## Choose your ideal
