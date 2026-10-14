@@ -14,6 +14,7 @@ const monkey = require('./monkey');
 const video = require('./video');
 const safety = require('./safety');
 const push = require('./push');
+const batchd = require('./batchd');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -211,7 +212,7 @@ app.get('/media/:id', h(async (req, res) => {
 // ---------- posts ----------
 // Base select for a post with author + counts + viewer state.
 const POST_SELECT = `
-SELECT p.id, p.text, p.image, p.parent_id, p.created_at, p.user_id,
+SELECT p.id, p.text, p.image, p.parent_id, p.created_at, p.user_id, p.challenge_day,
   u.username, u.name, u.avatar, u.ideal_name, u.ideal_preset_id, u.ideal_qualities,
   (SELECT COUNT(*)::int FROM likes l WHERE l.post_id=p.id) like_count,
   (SELECT COUNT(*)::int FROM posts r WHERE r.parent_id=p.id) reply_count,
@@ -237,6 +238,8 @@ function postOut(r) {
   if (!r) return r;
   const { ideal_name, ideal_preset_id, ideal_qualities, poll_raw, ...p } = video.videoOut(r);
   p.poll = pollOut(poll_raw);
+  p.challenge = p.challenge_day ? { day: p.challenge_day, prompt: batchd.promptFor(p.challenge_day) } : null;
+  delete p.challenge_day;
   const i = ideals.idealOut({ ideal_name, ideal_preset_id, ideal_qualities });
   p.ideal = i ? { name: i.name, primary: i.primary, color: i.color } : null;
   return p;
@@ -314,6 +317,9 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
     if (req.file || hasVideo) return res.status(400).json({ error: 'A poll can’t have media' });
     poll = { opts, ends: now() + mins * 60e3 };
   }
+  let challenge = null;
+  try { challenge = batchd.challengeDay(req.body, { parentId }); } catch (e) { return res.status(e.status).json({ error: e.message }); }
+  if (challenge && !text) return res.status(400).json({ error: 'Write your thought to answer the daily challenge' });
   let parent = null;
   if (parentId) {
     parent = await db.get('SELECT * FROM posts WHERE id=$1 AND repost_of IS NULL', [parentId]);
@@ -329,7 +335,7 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
   let id; const pushQ = [];
   try {
     id = await db.tx(async (c) => {
-      const { id } = await db.get('INSERT INTO posts(user_id,text,parent_id,created_at) VALUES ($1,$2,$3,$4) RETURNING id', [req.user.id, text, parentId, now()], c);
+      const { id } = await db.get('INSERT INTO posts(user_id,text,parent_id,created_at,challenge_day) VALUES ($1,$2,$3,$4,$5) RETURNING id', [req.user.id, text, parentId, now(), challenge], c);
       if (req.file) {
         const url = await saveMedia(c, req.file, req.user.id, id);
         await db.run('UPDATE posts SET image=$1 WHERE id=$2', [url, id], c);
@@ -341,6 +347,7 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
       return id;
     });
   } catch (e) {
+    if (e.code === '23505' && challenge && /challenge/.test(e.constraint || '')) return res.status(409).json({ error: 'You already answered today’s daily thought' });
     if (e.code === '23505' && vid) return res.status(409).json({ error: 'That video is already posted' });
     throw e;
   }
@@ -729,6 +736,9 @@ monkey.register(app, { auth, h, db, postIdParam });
 
 // ---------- Web Push + language preferences ----------
 push.register(app, { auth, h, db });
+
+// ---------- Daily thought challenge, ideal circles, stories ----------
+batchd.register(app, { auth, h, db, hydrate, getPosts, saveMedia, upload, now });
 
 // ---------- Account deletion + reports ----------
 safety.register(app, { auth, h, db });

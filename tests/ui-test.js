@@ -24,6 +24,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     return c;
   };
   const errors = [];
+  if (process.env.UI_ONLY === 'batchd') { await batchDUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'batchc') { await batchCUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'settings') { await settingsUi(browser, errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'video') { // quick run of one section
@@ -199,6 +200,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await videoUi(browser, errors, step);
   console.log('\n  Polls, voice posts, Momo moods + outfits');
   await batchCUi(errors, step);
+  await batchDUi(errors, step);
   console.log('\n  Settings: language + push');
   await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -763,7 +765,7 @@ async function adminUi(browser, errors, step, loggedIn) {
     if (iq.length !== 10 || iq.some((r, i) => r.q !== api.ideals.by_quality[i].quality || r.n !== api.ideals.by_quality[i].count)) throw new Error('ideal breakdown does not match the API: ' + JSON.stringify(iq));
     if (new Set(iq.map(r => r.c)).size !== 10) throw new Error('ideal breakdown colours are not distinct');
     step(`"Ideals chosen" breakdown: 10 coloured quality rows + ${await page.$$eval('#ideal-breakdown .ii-row', l => l.length)} top ideals, matching the API`);
-    const rows = await page.$$eval('.admin-table tbody tr', l => l.length);
+    const rows = await page.$$eval('.admin-table:not(.reports-table) tbody tr', l => l.length);
     if (rows !== Math.min(20, api.latest_signups.length)) throw new Error('table rows ' + rows);
     const href = await page.getAttribute('.admin-table tbody tr a.adm-user', 'href');
     if (href !== '/u/' + api.latest_signups[0].username) throw new Error('first row link ' + href);
@@ -1584,5 +1586,88 @@ async function batchCUi(errors, step) {
   } finally {
     for (const u of users) { await u.ctx.request.delete(B + '/api/me', { data: { confirm: u.username } }).catch(() => {}); await u.ctx.close(); }
     await br.close(); app.child.kill(); groq.srv.close(); await cld.close();
+  }
+}
+
+async function batchDUi(errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
+  const { startApp } = require('./ai-server');
+  const { startMockCloudinary } = require('./cloudinary-server');
+  const cld = await startMockCloudinary();
+  const app = await startApp({ port: 4227, env: { ...cld.env } });
+  const B = app.url;
+  const br = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
+  const rnd = Math.floor(Math.random() * 1e5);
+  const users = [];
+  const user = async (name, mobile) => {
+    const ctx = await br.newContext(mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1366, height: 900 } });
+    await ctx.route(B + '/api/monkey/**', (r) => r.fulfill({ json: { thought: 'Stub', mood: 'happy', source: 'test' } }));
+    const r = await ctx.request.post(B + '/api/signup', { data: { username: name + rnd, password: 'secret123', name: name.toUpperCase() + ' D', ideal: { presetId: 'kalam' } } });
+    if (!r.ok()) throw new Error('signup ' + name);
+    const page = await ctx.newPage(); page.on('pageerror', e => errors.push(e.message)); page.on('dialog', d => d.accept());
+    const u = { ctx, page, username: name + rnd }; users.push(u); return u;
+  };
+  try {
+    const a = await user('thinker'), b = await user('watcher', true);
+    const A = a.page, Bp = b.page;
+    // daily thought
+    await A.goto(B + '/home'); await A.waitForSelector('.daily-banner .db-q');
+    const prompt = await A.textContent('.daily-banner .db-q');
+    await A.click('.daily-banner [data-action="daily-answer"]');
+    await A.waitForSelector('#modal-composer[data-challenge="1"]');
+    if (!(await A.textContent('.daily-q')).includes(prompt)) throw new Error('prompt missing in modal');
+    await A.fill('#modal-composer textarea', 'Kindness is free and powerful');
+    await A.click('#modal-composer button[type=submit]');
+    await A.waitForSelector('.daily-banner a[href="/challenge"].btn');
+    step('feed banner shows today’s prompt; answering opens a composer with the prompt and the banner flips to “See answers”');
+    await A.goto(B + '/challenge'); await A.waitForSelector('.ch-feat .post');
+    if (!(await A.textContent('.ch-q')).includes(prompt.trim()) || !(await A.isVisible('.ch-feat[data-rank="1"] .challenge-chip'))) throw new Error('challenge page wrong');
+    step('challenge page: prompt + featured answer (🥇) with the “Daily thought” tag');
+    await A.screenshot({ path: OUT + '/24-challenge.png' });
+    // circles
+    await A.goto(B + '/u/' + a.username); await A.waitForSelector('a.ideal-badge.to-circle');
+    await A.click('a.ideal-badge.to-circle'); await A.waitForSelector('.circle-head [data-action="circle-join"]');
+    if (!/\/circle\/kalam$/.test(A.url())) throw new Error('badge link wrong: ' + A.url());
+    const n0 = +(await A.getAttribute('.cc-count', 'data-count'));
+    await A.click('[data-action="circle-join"]'); await A.waitForSelector('[data-action="circle-join"][data-joined="1"]');
+    await A.waitForFunction((n) => +document.querySelector('.cc-count').dataset.count === n + 1, n0);
+    await A.waitForSelector('#feed .post');
+    await A.click('.tabs a[href$="/members"]'); await A.waitForSelector(`#feed .user-row[data-href="/u/${a.username}"]`);
+    step('profile ideal badge links to the circle; join → member count +1, feed shows members’ posts, members tab lists me');
+    await A.screenshot({ path: OUT + '/25-circle.png' });
+    await A.click('[data-action="circle-join"]'); await A.waitForSelector('[data-action="circle-join"][data-joined="0"]');
+    step('leave the circle');
+    // stories: b follows a; a posts a photo story with a sticker + text
+    await b.ctx.request.post(B + `/api/users/${a.username}/follow`);
+    await A.goto(B + '/home'); await A.waitForSelector('.stories-bar [data-action="story-new"]');
+    await A.click('.stories-bar [data-action="story-new"]'); await A.waitForSelector('form[data-form="story"]');
+    await A.setInputFiles('form[data-form="story"] input[name="media"]', __dirname + '/../public/icon-512.png');
+    await A.fill('form[data-form="story"] input[name="caption"]', 'Good morning!');
+    await A.click('.sn-stk[data-mood="happy"]');
+    await A.waitForSelector('.sn-stage .sn-sticker .story-sticker[data-mood="happy"]');
+    await A.screenshot({ path: OUT + '/26-story-new.png' });
+    await A.click('form[data-form="story"] button[type=submit]:not([disabled])');
+    await A.waitForSelector('.stories-bar .story-ring[data-ring="0"]');
+    step('story creator: photo + Momo sticker + text overlay preview, share → my ring appears at the top of home');
+    await Bp.goto(B + '/home'); await Bp.waitForSelector('.stories-bar .story-ring:not(.seen)[data-ring]');
+    await Bp.click('.stories-bar .story-ring[data-ring="0"]');
+    await Bp.waitForSelector('.story-viewer .sv-caption'); 
+    if ((await Bp.textContent('.sv-caption')) !== 'Good morning!' || !(await Bp.isVisible('.sv-sticker[data-mood="happy"]'))) throw new Error('viewer content wrong');
+    if (await Bp.isVisible('.sv-views')) throw new Error('viewer sees view count');
+    await Bp.screenshot({ path: OUT + '/27-story-view.png' });
+    await Bp.click('.sv-tap.next'); await Bp.waitForSelector('.story-viewer', { state: 'detached' });
+    await Bp.waitForSelector('.stories-bar .story-ring.seen[data-ring]');
+    step('mobile: unseen ring → full-screen viewer with text + sticker; tap advances/closes; ring turns seen');
+    await A.reload(); await A.waitForSelector('.stories-bar .story-ring[data-ring="0"]');
+    await A.click('.stories-bar .story-ring[data-ring="0"]'); await A.waitForSelector('.sv-views');
+    if (!/1 view\b/.test(await A.textContent('.sv-views'))) throw new Error('view count wrong: ' + await A.textContent('.sv-views'));
+    await A.click('.sv-views'); await A.waitForSelector(`.sv-list .sv-vu[href="/u/${b.username}"]`);
+    step('owner sees “1 view” and the viewer list');
+    await A.click('[data-action="story-delete"]'); await A.waitForSelector('.story-viewer', { state: 'detached' });
+    await A.waitForSelector('.stories-bar [data-action="story-new"].story-ring.add:not(.small)');
+    step('owner deletes the story');
+  } finally {
+    for (const u of users) { await u.ctx.request.delete(B + '/api/me', { data: { confirm: u.username } }).catch(() => {}); await u.ctx.close(); }
+    await br.close(); app.child.kill(); await cld.close();
   }
 }

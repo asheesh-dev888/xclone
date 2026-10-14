@@ -218,3 +218,37 @@ CREATE TABLE IF NOT EXISTS poll_votes(
   PRIMARY KEY(post_id, user_id));
 -- Voice posts: audio-only Cloudinary assets in post_videos.
 ALTER TABLE post_videos ADD COLUMN IF NOT EXISTS is_audio BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Batch D: daily thought challenge (answers are posts tagged with the IST day), ideal circles, 24h stories.
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS challenge_day TEXT;
+CREATE INDEX IF NOT EXISTS posts_challenge_day ON posts(challenge_day) WHERE challenge_day IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS posts_challenge_once ON posts(user_id, challenge_day) WHERE challenge_day IS NOT NULL AND parent_id IS NULL AND repost_of IS NULL;
+CREATE TABLE IF NOT EXISTS circle_members(
+  circle TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  joined_at BIGINT NOT NULL,
+  PRIMARY KEY (circle, user_id));
+CREATE INDEX IF NOT EXISTS circle_members_user ON circle_members(user_id);
+CREATE TABLE IF NOT EXISTS stories(
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  media_id TEXT,
+  public_id TEXT,
+  cloud_name TEXT,
+  version BIGINT,
+  duration REAL,
+  width INTEGER,
+  height INTEGER,
+  sticker TEXT,
+  caption TEXT,
+  caption_pos REAL,
+  created_at BIGINT NOT NULL,
+  expires_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS stories_user_exp ON stories(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS stories_exp ON stories(expires_at);
+CREATE TABLE IF NOT EXISTS story_views(
+  story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  viewed_at BIGINT NOT NULL,
+  PRIMARY KEY (story_id, user_id));

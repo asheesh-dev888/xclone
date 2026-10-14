@@ -4,6 +4,8 @@
 (function () {
   const T = {
     hi: {
+      'Daily thought': 'आज का विचार', 'Today’s thought': 'आज का विचार', 'Answer': 'जवाब दें', 'See answers': 'जवाब देखें', 'Featured': 'चुनिंदा', 'All answers': 'सभी जवाब', 'Share': 'शेयर करें',
+      'Your story': 'आपकी स्टोरी', 'New story': 'नई स्टोरी', 'Share to story': 'स्टोरी में शेयर करें', 'Join': 'जुड़ें', 'Leave': 'छोड़ें', 'Members': 'सदस्य', 'Add': 'जोड़ें',
       'Home': 'होम', 'Explore': 'खोजें', 'Reels': 'रील्स', 'Notifications': 'सूचनाएँ', 'Messages': 'संदेश', 'Profile': 'प्रोफ़ाइल', 'Admin': 'एडमिन', 'Settings': 'सेटिंग्स',
       'Post': 'पोस्ट', 'Posts': 'पोस्ट', 'Replies': 'जवाब', 'Media': 'मीडिया', 'Likes': 'पसंद', 'Reposts': 'रीपोस्ट', 'Followers': 'फ़ॉलोअर्स', 'Following': 'फ़ॉलो कर रहे हैं',
       'Follow': 'फ़ॉलो करें', 'Unfollow': 'अनफ़ॉलो करें', 'Follows you': 'आपको फ़ॉलो करता है', 'For you': 'आपके लिए', 'Reply': 'जवाब दें', 'Repost': 'रीपोस्ट', 'Like': 'पसंद', 'Share': 'शेयर करें',
@@ -19,6 +21,8 @@
       'Welcome to your inbox!': 'आपके इनबॉक्स में स्वागत है!', 'Happening now': 'अभी चल रहा है', 'Join ZuZu today.': 'आज ही ZuZu से जुड़ें।', 'View profile': 'प्रोफ़ाइल देखें', 'Open in Reels': 'रील्स में खोलें',
     },
     hinglish: {
+      'Daily thought': 'Aaj ka thought', 'Today’s thought': 'Aaj ka thought', 'Answer': 'Jawab do', 'See answers': 'Jawab dekho', 'All answers': 'Saare jawab',
+      'Your story': 'Tumhari story', 'New story': 'Nayi story', 'Share to story': 'Story pe share karo', 'Join': 'Join karo', 'Leave': 'Chhodo',
       'Home': 'Home', 'Explore': 'Explore karo', 'Notifications': 'Notifications', 'Messages': 'Messages', 'Settings': 'Settings',
       'Posts': 'Posts', 'Replies': 'Jawab', 'Likes': 'Likes', 'Followers': 'Followers', 'Following': 'Following',
       'Follow': 'Follow karo', 'Unfollow': 'Unfollow karo', 'Follows you': 'Aapko follow karta hai', 'For you': 'Aapke liye', 'Reply': 'Jawab do', 'Share': 'Share karo',

@@ -254,7 +254,7 @@ function register(app, { auth, h, db, getPosts }) {
     if (!cfg) return res.status(503).json({ error: 'Video uploads are not available right now' });
     const pid = String((req.body || {}).public_id || '');
     if (!PUBLIC_ID_RE.test(pid) || pid.includes('..')) return res.status(400).json({ error: 'Invalid video id' });
-    if (await db.get('SELECT 1 FROM post_videos WHERE public_id=$1', [pid])) return res.status(409).json({ error: 'That video is posted' });
+    if (await db.get('SELECT 1 FROM post_videos WHERE public_id=$1 UNION ALL SELECT 1 FROM stories WHERE public_id=$1', [pid])) return res.status(409).json({ error: 'That video is posted' });
     const r = await fetchResource(cfg, pid);
     if (!r) return res.json({ ok: true });
     const uid = r.context && r.context.custom && r.context.custom.uid;

@@ -262,6 +262,7 @@ function postHTML(p, { thread = false } = {}) {
       <div class="meta"><a class="name" href="/u/${esc(p.username)}" data-link>${esc(p.name)}</a>${idealDot(p.ideal)}<span class="handle">@${esc(p.username)}</span><span>·</span><a href="/post/${p.id}" data-link title="${esc(fullDate(p.created_at))}">${ago(p.created_at)}</a>
         ${aiBtn(p)}<button class="more" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}" aria-label="More">${ic('dots', 'icon')}</button></div>
       ${p.reply_to ? `<div class="replying">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
+      ${challengeChip(p)}
       ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
       ${p.image ? `<div class="media"><img src="${esc(p.image)}" loading="lazy" alt=""></div>` : ''}
       ${p.video ? videoHTML(p) : ''}
@@ -299,8 +300,8 @@ function updatePostEverywhere(p) {
 const statsHTML = (p) => `<div class="stats"><span><b>${p.repost_count}</b> Reposts</span><span><b>${p.like_count}</b> Likes</span><span><b>${p.reply_count}</b> Replies</span></div>`;
 
 // ---------- composer ----------
-function composerHTML({ id, placeholder = 'What is happening?!', parentId = '', buttonLabel = 'Post', autofocus = false }) {
-  return `<form class="composer" data-form="compose" id="${id}" data-parent="${parentId}">
+function composerHTML({ id, placeholder = 'What is happening?!', parentId = '', buttonLabel = 'Post', autofocus = false, challenge = false }) {
+  return `<form class="composer" data-form="compose" id="${id}" data-parent="${parentId}"${challenge ? ' data-challenge="1"' : ''}>
     ${avatar(state.me)}
     <div class="body">
       <textarea name="text" rows="1" placeholder="${esc(placeholder)}" ${autofocus ? 'autofocus' : ''}></textarea>
@@ -384,6 +385,7 @@ document.addEventListener('submit', async (e) => {
     fd.append('text', f.text.value);
     if (f.image.files[0]) fd.append('image', f.image.files[0]);
     if (f.dataset.parent) fd.append('parent_id', f.dataset.parent);
+    if (f.dataset.challenge) fd.append('challenge', '1');
     const vs = composerVideo.get(f);
     if (vs && vs.result) {
       const r = vs.result;
@@ -400,7 +402,8 @@ document.addEventListener('submit', async (e) => {
       f.reset(); $('.preview', f).hidden = true; clearComposerVideo(f, { posted: true }); clearVoice(f, { posted: true }); pollReset(f); updateComposer(f);
       const inModal = f.closest('.modal');
       if (inModal) closeModal();
-      toast(f.dataset.parent ? 'Your reply was sent.' : post.video && post.video.is_reel ? 'Your reel was posted.' : 'Your post was sent.');
+      if (f.dataset.challenge) { dailyLoad(); if (location.pathname === '/challenge') return viewChallenge(); }
+      toast(f.dataset.challenge ? 'Your thought was shared.' : f.dataset.parent ? 'Your reply was sent.' : post.video && post.video.is_reel ? 'Your reel was posted.' : 'Your post was sent.');
       if (f.dataset.parent) {
         if (location.pathname === '/post/' + f.dataset.parent) { const list = $('#replies'); if (list) list.insertAdjacentHTML('beforeend', postHTML(post)); }
         const parent = postCache.get(+f.dataset.parent);
@@ -662,7 +665,8 @@ document.addEventListener('input', (e) => { if (e.target.matches('.ideal-picker 
 // Profile badge: "Ideal: <name>" in the primary colour, with quality chips.
 function idealBadge(i) {
   if (!i || !i.name) return '';
-  return `<div class="ideal-badge" style="--c:${qColor(i.primary)}" data-primary="${esc(i.primary || '')}" ${i.description ? `title="${esc(i.description)}"` : ''}><span class="dot"></span><span class="lbl">Ideal: <b>${esc(i.name)}</b></span><span class="chips">${qChips(i.qualities || [])}</span></div>`;
+  const tag = i.preset_id ? 'a' : 'div';
+  return `<${tag} class="ideal-badge${i.preset_id ? ' to-circle' : ''}" style="--c:${qColor(i.primary)}" data-primary="${esc(i.primary || '')}" ${i.preset_id ? `href="/circle/${esc(i.preset_id)}" data-link` : ''} ${i.description ? `title="${esc(i.description)}"` : ''}><span class="dot"></span><span class="lbl">Ideal: <b>${esc(i.name)}</b></span><span class="chips">${qChips(i.qualities || [])}</span>${i.preset_id ? `<span class="circle-go">Circle ›</span>` : ''}</${tag}>`;
 }
 const idealDot = (i) => i && i.name ? `<span class="ideal-dot" style="--c:${qColor(i.primary)}" title="Ideal: ${esc(i.name)}" aria-label="Ideal: ${esc(i.name)}"></span>` : '';
 function idealPrompt() {
@@ -731,6 +735,8 @@ function viewHome() {
       <button class="tab ${t === 'following' ? 'active' : ''}" data-action="home-tab" data-tab="following">Following</button>
     </div></div>
     ${appBanner()}
+    <div id="stories-bar" class="stories-bar"></div>
+    <div id="daily-banner"></div>
     ${idealPrompt()}
     ${composerHTML({ id: 'home-composer' })}
     <div id="feed">${loader()}</div>`, { active: 'home' });
@@ -739,6 +745,7 @@ function viewHome() {
     history.replaceState({}, '', '/home');
     if (!state.me.ideal) openIdealModal({ welcome: true });
   }
+  storiesLoad(); dailyLoad();
   loadFeed(t === 'following' ? '/api/feed/home' : '/api/feed/explore',
     `<div class="empty"><h3>Welcome to ZuZu!</h3><p>Follow some people to fill your timeline, or check the For you tab.</p><a class="btn btn-primary" href="/explore" data-link>Explore</a></div>`);
 }
@@ -798,6 +805,7 @@ async function viewPost(id) {
         <div class="head"><a href="/u/${esc(p.username)}" data-link>${avatar(p)}</a><div class="who"><a href="/u/${esc(p.username)}" data-link><b>${esc(p.name)}</b></a>${idealDot(p.ideal)}<div style="color:var(--muted)">@${esc(p.username)}</div></div>
           ${aiBtn(p)}<button class="more" style="position:relative;width:34px;height:34px;border-radius:50%;color:var(--muted)" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}">${ic('dots')}</button></div>
         ${p.reply_to ? `<div class="replying" style="margin-top:8px">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
+        ${challengeChip(p)}
         ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
         ${p.image ? `<div class="media"><img src="${esc(p.image)}" alt=""></div>` : ''}
         ${p.video ? videoHTML(p, { focus: true }) : ''}
@@ -2498,6 +2506,236 @@ async function loadReports() {
         : `<div class="stat-sub" style="padding:8px 0">No ${reportsFilter === 'all' ? '' : reportsFilter + ' '}reports.</div>`}`;
   } catch (e) { box.innerHTML = `<div class="stat-sub">Couldn’t load reports: ${esc(e.message)}</div>`; }
 }
+
+// ---------- Daily thought challenge (/challenge), ideal circles (/circle/:id), stories (home rings + viewer) ----------
+routes.push([/^\/challenge\/?$/, () => viewChallenge()]);
+routes.push([/^\/circle\/([\w-]+)(?:\/(members))?\/?$/, (m) => viewCircle(m[1], m[2] || 'posts')]);
+function challengeChip(p) {
+  if (!p.challenge) return '';
+  return `<a class="challenge-chip" href="/challenge?day=${esc(p.challenge.day)}" data-link title="${esc(p.challenge.prompt)}">💭 Daily thought</a>`;
+}
+async function dailyLoad() {
+  const el = $('#daily-banner'); if (!el) return;
+  try {
+    const d = await api('GET', '/api/challenge/today');
+    if (!$('#daily-banner')) return;
+    $('#daily-banner').innerHTML = `<div class="daily-banner" data-day="${esc(d.day)}"><div class="db-ic">💭</div><div class="db-body"><div class="db-k">Today’s thought</div><div class="db-q">${esc(d.prompt)}</div>
+      <div class="db-meta">${d.count} answer${d.count === 1 ? '' : 's'} so far</div></div><div class="db-acts">${d.answered ? `<a class="btn btn-outline" href="/challenge" data-link>See answers</a>` : `<button class="btn btn-primary" data-action="daily-answer">Answer</button><a class="db-link" href="/challenge" data-link>See answers</a>`}</div></div>`;
+  } catch { el.innerHTML = ''; }
+}
+function openDailyAnswer(prompt) {
+  openModal(`<div class="modal"><div class="modal-head"><button class="back" data-action="close-modal" aria-label="Close">${ic('close')}</button><h2>Daily thought</h2></div>
+    <div class="daily-q">💭 ${esc(prompt)}</div>
+    ${composerHTML({ id: 'modal-composer', placeholder: 'Share your thought…', buttonLabel: 'Share', autofocus: true, challenge: true })}</div>`);
+  $('#modal-composer textarea').focus();
+}
+async function viewChallenge() {
+  const day = new URLSearchParams(location.search).get('day') || '';
+  shell(`<div class="header"><div class="header-row"><button class="back" data-action="back" aria-label="Back">${ic('back')}</button><div><h1>Daily thought</h1><div class="sub" id="ch-day"></div></div></div></div><div id="challenge">${loader()}</div>`);
+  try {
+    const d = await api('GET', '/api/challenge' + (day ? '?day=' + encodeURIComponent(day) : ''));
+    remember(d.items);
+    const el = $('#challenge'); if (!el) return;
+    $('#ch-day').textContent = new Date(d.day + 'T00:00:00Z').toLocaleDateString('en-IN', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
+    const mine = d.items.some(x => x.user_id === state.me.id);
+    const top = d.items.filter(x => x.featured), rest = d.items.filter(x => !x.featured);
+    const medal = ['🥇', '🥈', '🥉'];
+    el.innerHTML = `<div class="ch-prompt"><div class="db-k">${d.today ? 'Today’s prompt' : 'Prompt'}</div><div class="ch-q">${esc(d.prompt)}</div>
+      ${d.today && !mine ? `<button class="btn btn-primary" data-action="daily-answer">Answer</button>` : ''}</div>
+      ${top.length ? `<div class="section-title">Featured</div><div class="ch-featured">${top.map((p, i) => `<div class="ch-feat" data-rank="${i + 1}"><span class="ch-medal">${medal[i]}</span>${postHTML(p)}</div>`).join('')}</div>` : ''}
+      ${rest.length ? `<div class="section-title">All answers</div>${rest.map(p => postHTML(p)).join('')}` : ''}
+      ${d.items.length ? '' : `<div class="empty"><h3>No answers yet</h3><p>Be the first to share a thought.</p></div>`}`;
+  } catch (err) { $('#challenge').innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+async function viewCircle(id, tab) {
+  shell(`<div class="header"><div class="header-row"><button class="back" data-action="back" aria-label="Back">${ic('back')}</button><div><h1 id="cc-name">Circle</h1><div class="sub" id="cc-sub"></div></div></div></div><div id="circle">${loader()}</div>`);
+  let d;
+  try { d = await api('GET', '/api/circles/' + encodeURIComponent(id)); }
+  catch (err) { $('#circle').innerHTML = `<div class="empty"><h3>Circle not found</h3><p>${esc(err.message)}</p></div>`; return; }
+  const c = d.circle, el = $('#circle'); if (!el) return;
+  $('#cc-name').textContent = c.name + ' circle';
+  $('#cc-sub').textContent = `${c.member_count} member${c.member_count === 1 ? '' : 's'}`;
+  const tabLink = (k, l) => `<a class="tab ${tab === k ? 'active' : ''}" href="/circle/${esc(c.id)}${k === 'posts' ? '' : '/' + k}" data-link>${l}</a>`;
+  el.innerHTML = `<div class="circle-head" style="--c:${esc(c.color || '#1d9bf0')}"><div class="cc-dot"></div><div class="cc-body"><div class="cc-title">${esc(c.name)}</div>
+      ${c.description ? `<div class="cc-desc">${esc(c.description)}</div>` : ''}<div class="chips">${qChips(c.qualities)}</div>
+      <div class="cc-count" data-count="${c.member_count}">${c.member_count} member${c.member_count === 1 ? '' : 's'}</div></div>
+      <button class="btn ${c.joined ? 'btn-outline' : 'btn-primary'}" data-action="circle-join" data-circle="${esc(c.id)}" data-joined="${c.joined ? 1 : 0}">${c.joined ? 'Leave' : 'Join'}</button></div>
+    <div class="tabs" style="border-bottom:1px solid var(--border)">${tabLink('posts', 'Posts')}${tabLink('members', 'Members')}</div>
+    <div id="feed">${tab === 'members' ? (d.members.length ? d.members.map(u => userRow(u)).join('') : `<div class="empty"><h3>No members yet</h3><p>Join to be the first.</p></div>`) : loader()}</div>`;
+  if (tab !== 'members') loadFeed(`/api/circles/${encodeURIComponent(c.id)}/feed`, `<div class="empty"><h3>Nothing here yet</h3><p>Posts from circle members show up here.</p></div>`);
+}
+
+// Stories
+const STICKERS = ['happy', 'funny', 'thoughtful', 'sad', 'angry'];
+const sticker = (m, cls = '') => `<div class="momo story-sticker ${cls}" data-mood="${esc(m)}">${MOMO_SVG}</div>`;
+const stories = { rings: [], viewer: null };
+async function storiesLoad() {
+  const bar = $('#stories-bar'); if (!bar) return;
+  try { stories.rings = (await api('GET', '/api/stories')).rings; } catch { stories.rings = []; }
+  if (!$('#stories-bar')) return;
+  const mine = stories.rings.find(r => r.mine);
+  const ringHTML = (r, i) => `<button class="story-ring${r.all_seen ? ' seen' : ''}" data-action="story-open" data-ring="${i}" aria-label="${esc(r.mine ? 'Your story' : r.user.name + '’s story')}"><span class="sr-av">${avatar(r.user)}</span><span class="sr-n">${r.mine ? 'Your story' : esc(r.user.username)}</span></button>`;
+  $('#stories-bar').innerHTML = `${mine ? '' : `<button class="story-ring add" data-action="story-new" aria-label="Add to your story"><span class="sr-av">${avatar(state.me)}<span class="sr-plus">+</span></span><span class="sr-n">Your story</span></button>`}
+    ${stories.rings.map(ringHTML).join('')}${mine ? `<button class="story-ring add small" data-action="story-new" aria-label="Add to your story"><span class="sr-av"><span class="sr-plus big">+</span></span><span class="sr-n">Add</span></button>` : ''}`;
+}
+function openStoryCreator() {
+  openModal(`<div class="modal story-new"><div class="modal-head"><button class="back" data-action="close-modal" aria-label="Close">${ic('close')}</button><h2>New story</h2></div>
+    <form data-form="story" class="sn-form">
+      <div class="sn-stage" data-empty="1"><div class="sn-media"></div><div class="sn-caption" hidden></div><div class="sn-sticker"></div>
+        <label class="sn-pick">${ic('image')}<span>Choose a photo${state.config.video ? ' or video' : ''}</span><input type="file" name="media" accept="image/png,image/jpeg,image/gif,image/webp${state.config.video ? ',video/*' : ''}" hidden></label></div>
+      <div class="sn-status" aria-live="polite"></div>
+      <div class="field"><label>Text on your story</label><input name="caption" maxlength="120" placeholder="Say something…" autocomplete="off"></div>
+      <div class="sn-row"><label>Text position <input type="range" name="pos" min="0.1" max="0.9" step="0.05" value="0.5"></label></div>
+      <div class="sn-stickers" role="radiogroup" aria-label="Momo sticker"><button type="button" class="sn-stk on" data-action="story-sticker" data-mood="">None</button>${STICKERS.map(m => `<button type="button" class="sn-stk" data-action="story-sticker" data-mood="${m}" title="${m}">${sticker(m, 'mini')}</button>`).join('')}</div>
+      <button class="btn btn-primary" type="submit" style="width:100%" disabled>Share to story</button></form></div>`);
+}
+const storyDraft = new WeakMap();
+function storyPreviewSync(f) {
+  const st = $('.sn-stage', f), cap = f.caption.value.trim(), d = storyDraft.get(f) || {};
+  const c = $('.sn-caption', st); c.hidden = !cap; c.textContent = cap; c.style.top = (f.pos.value * 100) + '%';
+  $('.sn-sticker', st).innerHTML = d.sticker ? sticker(d.sticker) : '';
+  $('button[type=submit]', f).disabled = !(d.file && (!d.isVideo || d.result)) || !!d.busy;
+}
+document.addEventListener('input', (e) => { const f = e.target.closest('form[data-form="story"]'); if (f && e.target.name !== 'media') storyPreviewSync(f); });
+document.addEventListener('change', async (e) => {
+  if (e.target.name !== 'media') return;
+  const f = e.target.closest('form[data-form="story"]'); if (!f) return;
+  const file = e.target.files[0]; if (!file) return;
+  const d = storyDraft.get(f) || {}; storyDraft.set(f, d);
+  const isVideo = /^video\//.test(file.type) || /\.(mp4|mov|webm|3gp|mkv)$/i.test(file.name);
+  Object.assign(d, { file, isVideo, result: null, busy: false });
+  const url = URL.createObjectURL(file);
+  $('.sn-media', f).innerHTML = isVideo ? `<video src="${url}" muted autoplay loop playsinline></video>` : `<img src="${url}" alt="">`;
+  $('.sn-stage', f).dataset.empty = '0';
+  const status = $('.sn-status', f); status.textContent = '';
+  if (isVideo) {
+    d.busy = true; storyPreviewSync(f);
+    try {
+      const meta = await readVideoMeta(file).catch(() => ({}));
+      if (meta.duration > 90.5) throw new Error('Story videos can be up to 90 seconds');
+      const sig = await api('POST', '/api/video/sign');
+      const ctl = {}; d.ctl = ctl;
+      d.result = await uploadVideo(file, sig, (done, total) => { status.textContent = `Uploading… ${Math.round(done / total * 100)}%`; }, ctl);
+      d.cloudName = sig.cloudName; status.textContent = 'Video ready';
+    } catch (err) { status.textContent = err.message; d.file = null; }
+    d.busy = false;
+  }
+  storyPreviewSync(f);
+});
+document.addEventListener('submit', async (e) => {
+  const f = e.target; if (f.dataset.form !== 'story') return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  const d = storyDraft.get(f) || {}; if (!d.file) return;
+  const btn = $('button[type=submit]', f); btn.disabled = true;
+  const fd = new FormData();
+  if (d.isVideo) fd.append('video', JSON.stringify({ public_id: d.result.public_id, version: d.result.version, cloud_name: d.cloudName, duration: d.result.duration }));
+  else fd.append('image', d.file);
+  if (d.sticker) fd.append('sticker', d.sticker);
+  fd.append('caption', f.caption.value.trim()); fd.append('caption_pos', f.pos.value);
+  try { await api('POST', '/api/stories', fd); closeModal(); toast('Added to your story'); storiesLoad(); }
+  catch (err) { toast(err.message); btn.disabled = false; }
+}, true);
+
+function storyOpen(ringIdx, storyIdx = null) {
+  const r = stories.rings[ringIdx]; if (!r) return;
+  if (storyIdx == null) { storyIdx = r.mine ? 0 : Math.max(0, r.stories.findIndex(s => !s.seen)); }
+  storyClose(true);
+  const el = document.createElement('div');
+  el.className = 'story-viewer'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Story');
+  document.body.appendChild(el); document.body.style.overflow = 'hidden';
+  stories.viewer = { el, ring: ringIdx, idx: storyIdx, timer: null, start: 0, dur: 5000, paused: false };
+  storyShow();
+}
+function storyShow() {
+  const v = stories.viewer; if (!v) return;
+  const r = stories.rings[v.ring], s = r.stories[v.idx];
+  clearTimeout(v.timer); cancelAnimationFrame(v.raf);
+  v.el.innerHTML = `<div class="sv-frame" data-story="${s.id}">
+    <div class="sv-bars">${r.stories.map((x, i) => `<span class="sv-bar"><i style="width:${i < v.idx ? 100 : 0}%"></i></span>`).join('')}</div>
+    <div class="sv-top">${avatar(r.user, 'sm')}<b>${esc(r.mine ? 'Your story' : r.user.name)}</b><span class="sv-ago">${ago(s.created_at)}</span>
+      ${r.mine ? `<button class="sv-del" data-action="story-delete" aria-label="Delete story">${ic('trash') || '🗑'}</button>` : ''}<button class="sv-x" data-action="story-close" aria-label="Close">${ic('close')}</button></div>
+    <div class="sv-media">${s.kind === 'video' ? `<video playsinline autoplay ${s.poster ? `poster="${esc(s.poster)}"` : ''}>${s.sources.map(x => `<source src="${esc(x.src)}"${x.type ? ` type="${x.type}"` : ''}>`).join('')}</video>` : `<img src="${esc(s.src)}" alt="">`}</div>
+    ${s.caption ? `<div class="sv-caption" style="top:${(s.caption_pos ?? 0.5) * 100}%">${esc(s.caption)}</div>` : ''}
+    ${s.sticker ? sticker(s.sticker, 'sv-sticker') : ''}
+    <button class="sv-tap prev" data-action="story-prev" aria-label="Previous"></button><button class="sv-tap next" data-action="story-next" aria-label="Next"></button>
+    ${r.mine ? `<button class="sv-views" data-action="story-viewers" data-id="${s.id}">👁 ${s.view_count || 0} view${s.view_count === 1 ? '' : 's'}</button>` : ''}
+    <div class="sv-list" hidden></div></div>`;
+  if (!r.mine && !s.seen) { s.seen = true; api('POST', `/api/stories/${s.id}/view`).catch(() => {}); if (r.stories.every(x => x.seen)) r.all_seen = true; }
+  const vid = $('video', v.el);
+  v.dur = 5000; v.start = performance.now(); v.elapsed = 0;
+  if (vid) { vid.muted = false; vid.play().catch(() => { vid.muted = true; vid.play().catch(() => {}); }); vid.addEventListener('loadedmetadata', () => { if (vid.duration && isFinite(vid.duration)) v.dur = vid.duration * 1000; }); vid.addEventListener('ended', storyNext); }
+  const bar = $$('.sv-bar i', v.el)[v.idx];
+  const tick = () => {
+    if (!stories.viewer || stories.viewer !== v) return;
+    if (!v.paused) v.elapsed = vid ? vid.currentTime * 1000 : performance.now() - v.start;
+    if (bar) bar.style.width = Math.min(100, v.elapsed / v.dur * 100) + '%';
+    if (!vid && v.elapsed >= v.dur) return storyNext();
+    v.raf = requestAnimationFrame(tick);
+  };
+  v.raf = requestAnimationFrame(tick);
+}
+function storyNext() {
+  const v = stories.viewer; if (!v) return;
+  const r = stories.rings[v.ring];
+  if (v.idx < r.stories.length - 1) { v.idx++; return storyShow(); }
+  if (v.ring < stories.rings.length - 1) { v.ring++; v.idx = stories.rings[v.ring].mine ? 0 : Math.max(0, stories.rings[v.ring].stories.findIndex(s => !s.seen)); return storyShow(); }
+  storyClose();
+}
+function storyPrev() {
+  const v = stories.viewer; if (!v) return;
+  if (v.idx > 0) { v.idx--; return storyShow(); }
+  if (v.ring > 0) { v.ring--; v.idx = stories.rings[v.ring].stories.length - 1; return storyShow(); }
+  storyShow();
+}
+function storyClose(silent) {
+  const v = stories.viewer; if (!v) return;
+  cancelAnimationFrame(v.raf); v.el.remove(); stories.viewer = null; document.body.style.overflow = '';
+  if (!silent) storiesLoad();
+}
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action^="story-"],[data-action="daily-answer"],[data-action="circle-join"]'); if (!el) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  const a = el.dataset.action;
+  if (a === 'daily-answer') { try { const d = await api('GET', '/api/challenge/today'); if (d.answered) return toast('You already answered today’s thought'); openDailyAnswer(d.prompt); } catch (err) { toast(err.message); } }
+  else if (a === 'circle-join') {
+    el.disabled = true;
+    try {
+      const { circle: c } = await api(el.dataset.joined === '1' ? 'DELETE' : 'POST', `/api/circles/${el.dataset.circle}/join`);
+      el.dataset.joined = c.joined ? '1' : '0'; el.textContent = c.joined ? 'Leave' : 'Join'; el.className = 'btn ' + (c.joined ? 'btn-outline' : 'btn-primary');
+      const n = `${c.member_count} member${c.member_count === 1 ? '' : 's'}`; const cc = $('.cc-count'); if (cc) { cc.textContent = n; cc.dataset.count = c.member_count; } const sub = $('#cc-sub'); if (sub) sub.textContent = n;
+      toast(c.joined ? `You joined the ${c.name} circle` : `You left the ${c.name} circle`);
+      if (location.pathname.endsWith('/members') || $('#feed')) viewCircle(c.id, location.pathname.endsWith('/members') ? 'members' : 'posts');
+    } catch (err) { toast(err.message); } finally { el.disabled = false; }
+  }
+  else if (a === 'story-new') openStoryCreator();
+  else if (a === 'story-open') storyOpen(+el.dataset.ring);
+  else if (a === 'story-next') storyNext();
+  else if (a === 'story-prev') storyPrev();
+  else if (a === 'story-close') storyClose();
+  else if (a === 'story-sticker') {
+    const f = el.closest('form'); const d = storyDraft.get(f) || {}; storyDraft.set(f, d);
+    d.sticker = el.dataset.mood || null; $$('.sn-stk', f).forEach(b => b.classList.toggle('on', b === el)); storyPreviewSync(f);
+  } else if (a === 'story-viewers') {
+    const v = stories.viewer; if (!v) return;
+    const list = $('.sv-list', v.el);
+    if (!list.hidden) { list.hidden = true; v.paused = false; v.start = performance.now() - v.elapsed; return; }
+    v.paused = true; $('video', v.el)?.pause();
+    list.hidden = false; list.innerHTML = loader();
+    try { const d = await api('GET', `/api/stories/${el.dataset.id}/viewers`); list.innerHTML = `<div class="sv-lh">Viewed by ${d.count}</div>` + (d.viewers.map(u => `<a class="sv-vu" href="/u/${esc(u.username)}" data-link>${avatar(u, 'sm')}<span>${esc(u.name)} <span class="h">@${esc(u.username)}</span></span></a>`).join('') || '<div class="h" style="padding:8px">No views yet</div>'); }
+    catch (err) { list.textContent = err.message; }
+  } else if (a === 'story-delete') {
+    const v = stories.viewer; if (!v) return;
+    const s = stories.rings[v.ring].stories[v.idx];
+    if (!confirm('Delete this story?')) return;
+    try { await api('DELETE', '/api/stories/' + s.id); toast('Story deleted'); storyClose(); } catch (err) { toast(err.message); }
+  }
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (!stories.viewer) return;
+  if (e.key === 'Escape') storyClose(); else if (e.key === 'ArrowRight') storyNext(); else if (e.key === 'ArrowLeft') storyPrev();
+});
+document.addEventListener('click', (e) => { if (stories.viewer && e.target.closest('.sv-vu')) storyClose(true); }, true);
+addEventListener('popstate', () => storyClose(true));
 
 async function loadConfig() {
   try { state.config = await api('GET', '/api/config'); } catch {}

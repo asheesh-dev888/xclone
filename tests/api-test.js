@@ -15,6 +15,7 @@ function client() {
   return c;
 }
 (async () => {
+  if (process.env.API_ONLY === 'batchd') { await batchDTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'batchc') { await batchCTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'push') { await pushTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'safety') { await safetyTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
@@ -83,6 +84,7 @@ function client() {
   await safetyTests();
   await pushTests();
   await batchCTests();
+  await batchDTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
 
@@ -1384,5 +1386,122 @@ async function batchCTests() {
   } finally {
     for (const [fn, u] of [[a, ua], [b, ub], [c, uc]]) await fn('DELETE', '/api/me', { confirm: u }).catch(() => {});
     await pg.end(); app.child.kill(); groq.srv.close(); cld.close ? cld.close() : cld.srv && cld.srv.close();
+  }
+}
+
+async function batchDTests() {
+  console.log('\n  Daily thought, ideal circles, stories');
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) { console.log('  (skipping: needs a local server)'); return; }
+  const fs = require('fs'), path = require('path');
+  const { startApp } = require('./ai-server');
+  const { startMockCloudinary, makeVideo } = require('./cloudinary-server');
+  const { localDbUrl } = require('./google-server');
+  const batchd = require('../batchd');
+  const cld = await startMockCloudinary();
+  const app = await startApp({ port: 4224, env: { ...cld.env, STORY_SWEEP_OPEN: '1' } });
+  const { Client } = require('pg'); const pg = new Client({ connectionString: localDbUrl() }); await pg.connect();
+  const mk = () => { let cookie = ''; return async (method, p, body) => {
+    const hd = {}; if (cookie) hd.cookie = cookie; let b;
+    if (body instanceof FormData) b = body; else if (body) { hd['content-type'] = 'application/json'; b = JSON.stringify(body); }
+    const res = await fetch(app.url + p, { method, headers: hd, body: b });
+    const sc = res.headers.get('set-cookie'); if (sc && /sid=/.test(sc)) cookie = sc.split(';')[0];
+    let data = {}; try { data = await res.json(); } catch {} return { status: res.status, data };
+  }; };
+  const form = (o) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) { if (v instanceof Blob) f.append(k, v, 'p.png'); else f.append(k, typeof v === 'string' ? v : JSON.stringify(v)); } return f; };
+  const png = () => new Blob([fs.readFileSync(path.join(__dirname, '..', 'public', 'icon-192.png'))], { type: 'image/png' });
+  const rnd = Math.floor(Math.random() * 1e6), ua = 'bd_a' + rnd, ub = 'bd_b' + rnd, uc = 'bd_c' + rnd;
+  const a = mk(), b = mk(), c = mk();
+  try {
+    await a('POST', '/api/signup', { username: ua, password: 'secret123', name: 'D A' });
+    await b('POST', '/api/signup', { username: ub, password: 'secret123', name: 'D B' });
+    await c('POST', '/api/signup', { username: uc, password: 'secret123', name: 'D C' });
+    // ---- daily thought ----
+    ok(batchd.PROMPTS.length >= 60 && new Set(batchd.PROMPTS).size === batchd.PROMPTS.length, 'at least 60 distinct prompts');
+    ok(batchd.istDay(Date.parse('2026-10-14T18:29:00Z')) === '2026-10-14' && batchd.istDay(Date.parse('2026-10-14T18:31:00Z')) === '2026-10-15', 'the day flips at IST midnight');
+    ok(batchd.promptFor('2026-10-14') !== batchd.promptFor('2026-10-15') && batchd.promptFor('2026-10-14') === batchd.promptFor('2026-10-14'), 'prompt is stable for a day and changes the next');
+    let r = await a('GET', '/api/challenge/today');
+    const day = r.data.day;
+    ok(r.status === 200 && r.data.prompt === batchd.promptFor(day) && r.data.answered === null, 'today’s prompt (not answered yet)');
+    r = await a('POST', '/api/posts', form({ text: 'My answer A', challenge: '1' }));
+    ok(r.status === 200 && r.data.post.challenge && r.data.post.challenge.day === day && r.data.post.challenge.prompt, 'answer becomes a post tagged with the challenge', JSON.stringify(r.data).slice(0, 200));
+    const pa = r.data.post;
+    r = await a('POST', '/api/posts', form({ text: 'Again', challenge: '1' }));
+    ok(r.status === 409, 'one answer per person per day');
+    r = await a('POST', '/api/posts', form({ text: 'reply', challenge: '1', parent_id: String(pa.id) }));
+    ok(r.status === 400, 'replies can’t answer the challenge');
+    const pb = (await b('POST', '/api/posts', form({ text: 'My answer B', challenge: '1' }))).data.post;
+    const pc = (await c('POST', '/api/posts', form({ text: 'My answer C', challenge: '1' }))).data.post;
+    await a('POST', `/api/posts/${pc.id}/like`); await b('POST', `/api/posts/${pc.id}/like`); await a('POST', `/api/posts/${pb.id}/like`);
+    r = await a('GET', '/api/challenge');
+    const ids = r.data.items.map(x => x.id);
+    ok(ids.indexOf(pc.id) < ids.indexOf(pb.id) && ids.indexOf(pb.id) < ids.indexOf(pa.id), 'challenge page is sorted by likes');
+    ok(r.data.items.slice(0, 3).every(x => x.featured) && r.data.items.slice(3).every(x => !x.featured) && r.data.items[0].rank === 1, 'top 3 are featured');
+    ok((await a('GET', '/api/challenge/today')).data.answered === pa.id, 'today shows my answer');
+    ok((await a('GET', '/api/challenge?day=2099-01-01')).status === 404, 'future days are not available');
+    ok((await a('GET', '/api/posts/' + pa.id)).data.post.challenge.day === day, 'tag shown on the post page');
+    // ---- circles ----
+    r = await a('GET', '/api/circles');
+    ok(r.status === 200 && r.data.circles.length > 5 && r.data.circles.some(x => x.id === 'kalam'), 'circles list (one per preset ideal)');
+    ok((await a('GET', '/api/circles/nope')).status === 404, 'unknown circle 404');
+    r = await a('POST', '/api/circles/kalam/join');
+    ok(r.status === 200 && r.data.circle.joined && r.data.circle.member_count >= 1, 'join a circle');
+    await a('POST', '/api/circles/kalam/join');
+    const before = (await b('GET', '/api/circles/kalam')).data.circle.member_count;
+    await b('POST', '/api/circles/kalam/join');
+    r = await a('GET', '/api/circles/kalam');
+    ok(r.data.circle.member_count === before + 1 && r.data.members.some(m => m.username === ua) && r.data.members.some(m => m.username === ub), 'members listed; joining twice is a no-op');
+    r = await c('GET', '/api/circles/kalam/feed');
+    ok(r.data.items.some(x => x.id === pa.id) && r.data.items.some(x => x.id === pb.id) && !r.data.items.some(x => x.id === pc.id), 'circle feed has members’ posts only');
+    r = await b('DELETE', '/api/circles/kalam/join');
+    ok(r.status === 200 && !r.data.circle.joined, 'leave a circle');
+    ok(!(await c('GET', '/api/circles/kalam/feed')).data.items.some(x => x.id === pb.id), 'left member’s posts leave the circle feed');
+    // ---- stories ----
+    await b('POST', `/api/users/${ua}/follow`);
+    r = await a('POST', '/api/stories', form({ image: png(), sticker: 'happy', caption: 'Hello story', caption_pos: '0.3' }));
+    ok(r.status === 200 && r.data.story.kind === 'photo' && r.data.story.sticker === 'happy' && r.data.story.caption === 'Hello story' && r.data.story.view_count === 0, 'photo story with sticker + text', JSON.stringify(r.data).slice(0, 200));
+    const s1 = r.data.story;
+    ok(s1.expires_at - s1.created_at === 24 * 3600e3, 'stories live for 24 hours');
+    ok((await a('POST', '/api/stories', form({ caption: 'nothing' }))).status === 400, 'a story needs media');
+    ok((await a('POST', '/api/stories', form({ image: png(), sticker: 'evil' }))).status === 400, 'unknown sticker rejected');
+    ok((await a('POST', '/api/stories', form({ image: png(), caption: 'x'.repeat(121) }))).status === 400, 'long text rejected');
+    const sg = (await a('POST', '/api/video/sign')).data;
+    const f = new FormData(); for (const [k, v] of Object.entries(sg.params)) f.append(k, String(v));
+    f.append('file', new Blob([fs.readFileSync(makeVideo({ seconds: 2 }))], { type: 'video/mp4' }), 'v.mp4');
+    const up = await (await fetch(sg.uploadUrl, { method: 'POST', body: f })).json();
+    r = await a('POST', '/api/stories', form({ video: { public_id: up.public_id }, sticker: 'funny' }));
+    ok(r.status === 200 && r.data.story.kind === 'video' && r.data.story.sources.length === 2 && r.data.story.poster, 'video story via Cloudinary', JSON.stringify(r.data).slice(0, 200));
+    const s2 = r.data.story;
+    ok((await b('POST', '/api/stories', form({ video: { public_id: up.public_id } }))).status >= 400, 'someone else’s video can’t become your story');
+    r = await b('GET', '/api/stories');
+    const ring = r.data.rings.find(x => x.user.username === ua);
+    ok(ring && ring.stories.length === 2 && !ring.all_seen && ring.stories.every(s => s.view_count === undefined), 'follower sees my ring (unseen, no view counts)');
+    ok(!(await c('GET', '/api/stories')).data.rings.some(x => x.user.username === ua), 'non-followers don’t get the ring at the top');
+    await b('POST', `/api/stories/${s1.id}/view`); await b('POST', `/api/stories/${s1.id}/view`); await c('POST', `/api/stories/${s1.id}/view`);
+    await a('POST', `/api/stories/${s1.id}/view`);
+    r = await a('GET', '/api/stories');
+    ok(r.data.rings[0].mine && r.data.rings[0].stories[0].view_count === 2, 'owner sees the view count (own views and repeats not counted)');
+    r = await a('GET', `/api/stories/${s1.id}/viewers`);
+    ok(r.status === 200 && r.data.count === 2 && r.data.viewers.some(v => v.username === ub), 'owner sees who viewed');
+    ok((await b('GET', `/api/stories/${s1.id}/viewers`)).status === 404, 'others can’t see viewers');
+    await b('POST', `/api/stories/${s2.id}/view`);
+    ok((await b('GET', '/api/stories')).data.rings.find(x => x.user.username === ua).all_seen, 'ring turns seen after viewing everything');
+    ok((await c('GET', `/api/users/${ua}/stories`)).data.stories.length === 2, 'stories by user');
+    // expiry: push one into the past -> hidden immediately, then swept with media + Cloudinary cleanup
+    await pg.query('UPDATE stories SET expires_at=$1 WHERE id = ANY($2::int[])', [Date.now() - 1000, [s1.id, s2.id]]);
+    ok((await b('GET', '/api/stories')).data.rings.every(x => x.user.username !== ua), 'expired stories disappear right away (query filter)');
+    ok((await b('POST', `/api/stories/${s1.id}/view`)).status === 404, 'expired story can’t be viewed');
+    r = await a('POST', '/api/stories/sweep');
+    ok(r.status === 200 && r.data.removed >= 2, 'sweeper removes expired stories');
+    const left = await pg.query('SELECT 1 FROM stories WHERE id = ANY($1::int[])', [[s1.id, s2.id]]);
+    const med = await pg.query('SELECT 1 FROM media WHERE id=$1', [s1.src.slice(7)]);
+    ok(left.rowCount === 0 && med.rowCount === 0, 'story rows and photo deleted');
+    await new Promise(res => setTimeout(res, 800));
+    const dq = await pg.query('SELECT 1 FROM video_deletions WHERE public_id=$1', [up.public_id]);
+    ok(cld.calls.destroy.some(d => d.public_id === up.public_id) || dq.rowCount === 1, 'expired video destroyed on Cloudinary');
+    r = await a('POST', '/api/stories', form({ image: png() }));
+    ok((await a('DELETE', `/api/stories/${r.data.story.id}`)).status === 200 && (await b('GET', `/api/users/${ua}/stories`)).data.stories.length === 0, 'owner can delete a story');
+  } finally {
+    for (const [fn, u] of [[a, ua], [b, ub], [c, uc]]) await fn('DELETE', '/api/me', { confirm: u }).catch(() => {});
+    await pg.end(); app.child.kill(); cld.close ? cld.close() : cld.srv && cld.srv.close();
   }
 }

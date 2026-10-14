@@ -15,6 +15,7 @@ async function queueVideosForUser(db, client, userId) {
   return db.run(`INSERT INTO video_deletions(public_id, cloud_name, created_at)
     WITH RECURSIVE t AS (SELECT id FROM posts WHERE user_id=$1 UNION SELECT p.id FROM posts p JOIN t ON p.parent_id=t.id OR p.repost_of=t.id)
     SELECT v.public_id, v.cloud_name, $2::bigint FROM post_videos v JOIN t ON t.id=v.post_id
+    UNION SELECT s.public_id, s.cloud_name, $2::bigint FROM stories s WHERE s.user_id=$1 AND s.public_id IS NOT NULL
     ON CONFLICT (public_id) DO NOTHING`, [userId, Date.now()], client);
 }
 
