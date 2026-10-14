@@ -341,9 +341,10 @@ svg{fill:currentColor}
 .dm-img{display:block;max-width:min(320px,100%);max-height:320px;object-fit:cover}
 .msg .meta{font-size:13px;color:var(--muted);margin-top:4px}
 .msg .seen{color:var(--muted)}
-.msg-del{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted);opacity:0;flex:none}
-.msg-del .icon{width:16px;height:16px}
+.msg-del,.msg-report{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted);opacity:0;flex:none}
+.msg-del .icon,.msg-report .icon{width:16px;height:16px}
 .msg:hover .msg-del,.msg-del:focus{opacity:1}
+.msg:hover .msg-report,.msg-report:focus{opacity:1}
 .msg-del:hover{color:var(--red);background:rgba(244,33,46,.1)}
 @media (hover:none){.msg-del{opacity:.45}}
 .dm-compose{border-top:1px solid var(--border);padding:8px 12px;padding-bottom:calc(8px + env(safe-area-inset-bottom));flex:none}
@@ -748,3 +749,18 @@ body.reels-page .fab{display:none}
   .bottom-nav .bn-reels .icon{width:26px;height:26px}
 }
 @media (prefers-reduced-motion:reduce){.vprog-bar,.reel-toggle .sw,.reel-toggle .sw::after{transition:none}}
+/* settings + reports */
+.settings{padding:8px 16px 40px}
+.set-sec{border-bottom:1px solid var(--border);padding:16px 0}
+.set-sec h2{font-size:19px;margin:0 0 6px}
+.set-sec .muted,.report-modal .muted{color:var(--muted)}
+.set-sec .btn .icon{width:18px;height:18px}
+.danger-zone h2{color:var(--red)}
+.btn-danger{background:var(--red);color:#fff}.btn-danger:disabled{opacity:.5}
+.report-reasons{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.rr{display:flex;align-items:center;gap:10px;padding:10px 8px;border-radius:10px;cursor:pointer}
+.rr:hover{background:var(--hover)}.rr input{accent-color:var(--blue);width:18px;height:18px}
+.report-modal form{padding:0 16px 16px}
+.msg.theirs .msg-report{order:2}
+.rep-snap{color:var(--muted);font-size:13px;max-width:320px;overflow-wrap:anywhere}
+.rep-tabs{margin-left:auto;display:flex;gap:6px}.rep-tabs .pill{cursor:pointer;text-transform:capitalize}.rep-tabs .pill.on{background:var(--blue);color:#fff}

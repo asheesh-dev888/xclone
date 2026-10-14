@@ -46,6 +46,8 @@ const P = {
   play: 'M8 5.14v13.72a1 1 0 0 0 1.52.85l10.6-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z',
   sparkle: 'M10 2.5l1.95 5.55L17.5 10l-5.55 1.95L10 17.5l-1.95-5.55L2.5 10l5.55-1.95L10 2.5zm0 4.6l-.85 2.05L7.1 10l2.05.85L10 12.9l.85-2.05L12.9 10l-2.05-.85L10 7.1zM18.5 14l.95 2.55L22 17.5l-2.55.95L18.5 21l-.95-2.55L15 17.5l2.55-.95L18.5 14z',
 };
+P.gear = 'M12 8.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zm0 5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm8.4-1.06l1.73-1.35-1.99-3.45-2.04.82a7.3 7.3 0 00-1.83-1.06L16 3.25h-4l-.3 2.15c-.66.26-1.27.62-1.83 1.06l-2.04-.82-1.99 3.45 1.73 1.35a7.4 7.4 0 000 2.12l-1.73 1.35 1.99 3.45 2.04-.82c.56.44 1.17.8 1.83 1.06l.3 2.15h4l.3-2.15c.66-.26 1.27-.62 1.83-1.06l2.04.82 1.99-3.45-1.73-1.35a7.4 7.4 0 000-2.12zm-2.2 1.77l-.13.87 1.16.9-.85 1.48-1.37-.55-.69.53c-.41.32-.86.58-1.35.77l-.81.32-.2 1.47h-1.72l-.2-1.47-.81-.32a5.3 5.3 0 01-1.35-.77l-.69-.53-1.37.55-.85-1.48 1.16-.9-.13-.87a5.4 5.4 0 010-1.54l.13-.87-1.16-.9.85-1.48 1.37.55.69-.53c.41-.32.86-.58 1.35-.77l.81-.32.2-1.47h1.72l.2 1.47.81.32c.49.19.94.45 1.35.77l.69.53 1.37-.55.85 1.48-1.16.9.13.87a5.4 5.4 0 010 1.54z';
+P.flag = 'M5 2v20h2v-7h11.5l-2-4.5 2-4.5H7V2H5zm2 4h8.42l-1.1 2.5 1.1 2.5H7V6z';
 const ic = (name, cls = 'icon') => `<svg viewBox="0 0 24 24" class="${cls}" aria-hidden="true"><path d="${P[name]}"/></svg>`;
 
 // ---------- Android app download ----------
@@ -205,7 +207,7 @@ function shell(center, { active = '', layout = '' } = {}) {
         <a href="/u/${esc(me.username)}" data-link>${avatar(me, 'sm')}</a>
         <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}</a>
         ${state.admin ? `<a class="mobile-admin" href="/admin" data-link aria-label="Admin" title="Admin">${ic('chart')}</a>` : ''}
-        <div class="mt-right">${momoToggleHTML(true)}<button class="spacer" data-action="logout" aria-label="Log out" title="Log out">${ic('logout')}</button></div>
+        <div class="mt-right">${momoToggleHTML(true)}<a class="spacer" href="/settings" data-link aria-label="Settings" title="Settings">${ic('gear')}</a><button class="spacer" data-action="logout" aria-label="Log out" title="Log out">${ic('logout')}</button></div>
       </div>
       <div id="center">${center}</div>
     </main>
@@ -462,7 +464,7 @@ document.addEventListener('click', async (e) => {
     } else if (a === 'post-menu') {
       closeMenus();
       const mine = el.dataset.mine === '1';
-      el.insertAdjacentHTML('beforeend', `<div class="dropdown">${mine ? `<button class="danger" data-action="delete" data-id="${id}">${ic('trash')}Delete</button>` : ''}<button data-action="copy-link" data-id="${id}">${ic('link')}Copy link</button></div>`);
+      el.insertAdjacentHTML('beforeend', `<div class="dropdown">${mine ? `<button class="danger" data-action="delete" data-id="${id}">${ic('trash')}Delete</button>` : ''}<button data-action="copy-link" data-id="${id}">${ic('link')}Copy link</button>${mine ? '' : `<button data-action="report" data-type="post" data-id="${id}">${ic('flag')}Report post</button>`}</div>`);
     } else if (a === 'copy-link') {
       closeMenus(); const url = location.origin + '/post/' + id;
       try { await navigator.clipboard.writeText(url); toast('Copied to clipboard'); } catch { toast(url); }
@@ -480,7 +482,7 @@ document.addEventListener('click', async (e) => {
       if (location.pathname === '/u/' + name) { const fc = $('#followers-count'); if (fc) fc.textContent = user.followers; }
     } else if (a === 'me-menu') {
       if ($('.menu')) return closeMenus();
-      el.insertAdjacentHTML('beforeend', `<div class="menu"><a href="/u/${esc(state.me.username)}" data-link>View profile</a><button data-action="logout">Log out @${esc(state.me.username)}</button></div>`);
+      el.insertAdjacentHTML('beforeend', `<div class="menu"><a href="/u/${esc(state.me.username)}" data-link>View profile</a><a href="/settings" data-link>Settings</a><button data-action="logout">Log out @${esc(state.me.username)}</button></div>`);
     } else if (a === 'logout') {
       await api('POST', '/api/logout'); state.me = null; go('/login', true);
     } else if (a === 'clear-video' || a === 'cancel-video') {
@@ -804,7 +806,7 @@ async function viewProfile(username, tab) {
   $('#profile').innerHTML = `
     <div class="banner" style="${u.banner ? `background-image:url(${esc(u.banner)})` : ''}"></div>
     <div class="pf">
-      <div class="top">${avatar(u, 'lg')}${isMe ? `<button class="btn btn-outline" data-action="edit-profile">Edit profile</button>` : `<div class="pf-actions"><button class="btn btn-outline btn-icon" data-action="dm-user" data-username="${esc(u.username)}" aria-label="Message" title="Message">${ic('mail')}</button>${followBtn(u)}</div>`}</div>
+      <div class="top">${avatar(u, 'lg')}${isMe ? `<button class="btn btn-outline" data-action="edit-profile">Edit profile</button>` : `<div class="pf-actions"><button class="btn btn-outline btn-icon" data-action="report" data-type="user" data-username="${esc(u.username)}" aria-label="Report @${esc(u.username)}" title="Report">${ic('flag')}</button><button class="btn btn-outline btn-icon" data-action="dm-user" data-username="${esc(u.username)}" aria-label="Message" title="Message">${ic('mail')}</button>${followBtn(u)}</div>`}</div>
       <div class="name">${esc(u.name)}</div>
       <div class="handle">@${esc(u.username)}${u.follows_you ? '<span class="follows-you">Follows you</span>' : ''}</div>
       ${u.ideal ? idealBadge(u.ideal) : isMe ? `<button class="ideal-add" data-action="open-ideal">${ic('sparkle')}Choose your ideal</button>` : ''}
@@ -986,7 +988,7 @@ function msgHTML(c, m, prev, next, lastMineId) {
   const seen = mine && m.id === lastMineId && c.otherRead >= m.created_at;
   const day = !prev || dayLabel(prev.created_at) !== dayLabel(m.created_at) ? `<div class="dm-day">${esc(dayLabel(m.created_at))}</div>` : '';
   return `${day}<div class="msg ${mine ? 'mine' : 'theirs'} ${end ? 'end' : ''}" data-msg="${m.id}">
-    <div class="row">${mine ? `<button class="msg-del" data-action="dm-delete" data-id="${m.id}" aria-label="Delete message" title="Delete">${ic('trash')}</button>` : ''}
+    <div class="row">${mine ? `<button class="msg-del" data-action="dm-delete" data-id="${m.id}" aria-label="Delete message" title="Delete">${ic('trash')}</button>` : ''}${mine ? '' : `<button class="msg-report" data-action="report" data-type="message" data-id="${m.id}" aria-label="Report message" title="Report">${ic('flag')}</button>`}
       <div class="content" title="${esc(fullDate(m.created_at))}">${m.image ? `<a class="dm-media" href="${esc(m.image)}" target="_blank" rel="noopener"><img class="dm-img" src="${esc(m.image)}" alt="Image"></a>` : ''}${m.text ? `<div class="bubble">${linkify(m.text)}</div>` : ''}</div></div>
     ${end || seen ? `<div class="meta">${end ? `<time>${esc(msgTime(m.created_at))}</time>` : ''}${seen ? `${end ? ' · ' : ''}<span class="seen">Seen</span>` : ''}</div>` : ''}
   </div>`;
@@ -1756,9 +1758,11 @@ function renderAdmin(s) {
     </div>
     ${adminChart(s.daily_signups)}
     ${s.ideals ? adminIdeals(s.ideals) : ''}
+    <div id="admin-reports" class="chart-card"><div class="chart-head"><h2>Reports</h2><span class="stat-sub">Loading…</span></div></div>
     <div class="section-title">Latest sign-ups</div>
     ${adminTable(s.latest_signups)}
     <div class="footer-note">Demo/seeded accounts are excluded from sign-ups. ${num(s.users.google)} real user${s.users.google === 1 ? '' : 's'} joined with Google. Today is ${esc(s.today)} (IST).</div>`;
+  loadReports();
   const up = $('#admin-updated'); if (up) up.textContent = 'Updated ' + new Date(s.generated_at).toLocaleTimeString('en-IN', { timeZone: IST, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' IST';
 }
 async function loadAdmin() {
@@ -1892,7 +1896,8 @@ function momoPick(exclude) {
   const vh = innerHeight, mid = vh / 2, band = momo.band;
   const pool = momo.visible.size ? [...momo.visible] : $$(MOMO_POSTS);
   const rects = (sel) => $$(sel).map(b => b.getBoundingClientRect()).filter(r => r.width && r.bottom > 0 && r.top < vh);
-  const blockers = rects(MOMO_BLOCKERS), bodyBlockers = rects(MOMO_BLOCKERS_BODY);
+  const blockers = rects(band.mobile ? MOMO_BLOCKERS.replace('.actions .act', '.actions .act .ic') : MOMO_BLOCKERS), // mobile: the bigger Momo fits between the tap circles, not the counts
+    bodyBlockers = rects(MOMO_BLOCKERS_BODY);
   const hit = (b, box) => b.right > box.l + 1 && b.left < box.r - 1 && b.bottom > box.t + 1 && b.top < box.b - 1;
   let best = null, bestD = Infinity;
   for (const el of pool) {
@@ -1901,9 +1906,9 @@ function momoPick(exclude) {
     if (r.top < band.top || r.top > band.bottom || r.height < 40) continue;
     const a = momoAnchor(r);
     let shift = -1;
-    for (let dx = 0; dx <= 160; dx += 8) {
+    for (let dx = 0; dx <= (band.mobile ? 320 : 160); dx += 4) {
       const x = a.x - dx, box = { l: x + momo.W * 0.12, r: x + momo.W * 0.96, t: a.y, b: a.y + momo.H }, body = { ...box, b: a.y + momoSeat() };
-      if (x < r.left + 60) break;
+      if (x < r.left + (band.mobile ? 4 : 60)) break;
       if (!blockers.some(b => hit(b, box)) && !bodyBlockers.some(b => hit(b, body))) { shift = dx; break; }
     }
     if (shift < 0) continue;
@@ -2180,6 +2185,79 @@ setInterval(async () => {
     $$('a[href="/notifications"]').forEach(a => { if (!$('.badge', a)) a.insertAdjacentHTML('beforeend', `<span class="badge">${state.unread}</span>`); });
   }
 }, 30000);
+
+// ---------- Settings (/settings): account deletion; reports (posts, profiles, DM messages); admin report queue ----------
+routes.push([/^\/settings\/?$/, () => viewSettings()]);
+function viewSettings() {
+  const u = state.me;
+  shell(`<div class="header"><div class="header-row"><button class="back" data-action="back" aria-label="Back">${ic('back')}</button><h1>Settings</h1></div></div>
+    <div class="settings" id="settings">
+      <section class="set-sec" id="set-account"><h2>Account</h2><p class="muted">Signed in as <b>@${esc(u.username)}</b></p>
+        <button class="btn btn-outline" data-action="logout">${ic('logout')} Log out</button></section>
+      <section class="set-sec danger-zone" id="set-delete"><h2>Delete account</h2>
+        <p class="muted">This permanently deletes your profile, posts, replies, likes, follows, photos, videos and messages. It can’t be undone. <a class="link" href="/delete-account" target="_blank" rel="noopener">What gets deleted</a></p>
+        <form data-form="delete-account" autocomplete="off"><div class="field"><label for="del-confirm">Type <b>${esc(u.username)}</b> (or your password) to confirm</label>
+          <input id="del-confirm" name="confirm" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${esc(u.username)}"></div>
+          <button class="btn btn-danger" type="submit" disabled>Delete my account</button></form></section>
+    </div>`, { active: '' });
+}
+document.addEventListener('input', (e) => {
+  const f = e.target.closest('form[data-form="delete-account"]'); if (!f) return;
+  $('button[type="submit"]', f).disabled = !f.confirm.value.trim();
+});
+document.addEventListener('submit', async (e) => {
+  const f = e.target.closest('form[data-form="delete-account"],form[data-form="report"]'); if (!f) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  const btn = $('button[type="submit"]', f); btn.disabled = true;
+  try {
+    if (f.dataset.form === 'delete-account') {
+      if (!confirm('Delete your ZuZu account permanently? This can’t be undone.')) { btn.disabled = false; return; }
+      await api('DELETE', '/api/me', { confirm: f.confirm.value });
+      state.me = null; toast('Your account was deleted'); go('/login', true);
+    } else {
+      const reason = (f.querySelector('input[name="reason"]:checked') || {}).value;
+      if (!reason) { btn.disabled = false; return toast('Pick a reason'); }
+      const r = await api('POST', '/api/reports', { type: f.dataset.type, id: f.dataset.id ? +f.dataset.id : undefined, username: f.dataset.username || undefined, reason, note: f.note.value });
+      closeModal(); toast(r.duplicate ? 'You already reported this. Thanks!' : 'Thanks — our team will review your report');
+    }
+  } catch (err) { btn.disabled = false; toast(err.message); }
+}, true);
+const REPORT_REASONS = [['spam', 'Spam'], ['abuse', 'Abuse or harassment'], ['nudity', 'Nudity or sexual content'], ['hate', 'Hate speech'], ['violence', 'Violence or threats'], ['misinformation', 'Misinformation'], ['other', 'Something else']];
+function openReport(type, { id, username } = {}) {
+  closeMenus();
+  const what = type === 'post' ? 'post' : type === 'user' ? `@${username}` : 'message';
+  openModal(`<div class="modal report-modal"><div class="modal-head"><button class="back" data-action="close-modal" aria-label="Close">${ic('close')}</button><h2>Report ${esc(what)}</h2></div>
+    <form data-form="report" data-type="${type}" ${id ? `data-id="${esc(id)}"` : ''} ${username ? `data-username="${esc(username)}"` : ''}>
+      <p class="muted" style="margin:4px 0 10px">Why are you reporting this ${type === 'user' ? 'account' : type}?</p>
+      <div class="report-reasons" role="radiogroup">${REPORT_REASONS.map(([k, l]) => `<label class="rr"><input type="radio" name="reason" value="${k}"><span>${esc(l)}</span></label>`).join('')}</div>
+      <div class="field"><label>Add details (optional)</label><textarea name="note" rows="3" maxlength="500"></textarea></div>
+      <button class="btn btn-primary" type="submit" style="width:100%">Submit report</button></form></div>`);
+}
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action="report"],[data-action="resolve-report"],[data-action="reports-filter"]'); if (!el) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (el.dataset.action === 'report') return openReport(el.dataset.type, { id: el.dataset.id, username: el.dataset.username });
+  if (el.dataset.action === 'reports-filter') { reportsFilter = el.dataset.status; return loadReports(); }
+  el.disabled = true;
+  api('POST', `/api/admin/reports/${el.dataset.id}/resolve`).then(() => { toast('Marked resolved'); loadReports(); }).catch(err => { el.disabled = false; toast(err.message); });
+}, true);
+let reportsFilter = 'open';
+async function loadReports() {
+  const box = $('#admin-reports'); if (!box) return;
+  try {
+    const d = await api('GET', '/api/admin/reports?status=' + reportsFilter);
+    const link = (r) => r.type === 'post' ? `<a class="link" href="/post/${r.target_id}" data-link>Post #${r.target_id}</a>`
+      : r.type === 'user' ? `<a class="link" href="/u/${esc(r.target_username || '')}" data-link>@${esc(r.target_username || 'deleted')}</a>` : `Message #${r.target_id}`;
+    box.innerHTML = `<div class="chart-head"><h2>Reports</h2><span class="stat-sub" data-open-reports="${d.open}">${num(d.open)} open</span>
+      <span class="rep-tabs">${['open', 'resolved', 'all'].map(s => `<button class="pill${s === reportsFilter ? ' on' : ''}" data-action="reports-filter" data-status="${s}">${s}</button>`).join('')}</span></div>
+      ${d.reports.length ? `<div class="table-wrap"><table class="admin-table reports-table"><thead><tr><th>Target</th><th>Reason</th><th>From</th><th>When (IST)</th><th></th></tr></thead><tbody>${d.reports.map(r => `
+        <tr data-report="${r.id}"><td>${link(r)}${r.type !== 'user' && r.target_username ? ` <span class="h">by @${esc(r.target_username)}</span>` : ''}${r.snapshot ? `<div class="rep-snap">${esc(r.snapshot.slice(0, 140))}</div>` : ''}${r.total_for_target > 1 ? `<span class="pill">${r.total_for_target} reports</span>` : ''}</td>
+        <td><b>${esc(r.reason_label)}</b>${r.note ? `<div class="rep-snap">${esc(r.note)}</div>` : ''}</td><td>@${esc(r.reporter)}</td><td class="t">${esc(istTime(r.created_at))}</td>
+        <td>${r.status === 'open' ? `<button class="btn btn-outline" data-action="resolve-report" data-id="${r.id}">Resolve</button>` : '<span class="pill">resolved</span>'}</td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="stat-sub" style="padding:8px 0">No ${reportsFilter === 'all' ? '' : reportsFilter + ' '}reports.</div>`}`;
+  } catch (e) { box.innerHTML = `<div class="stat-sub">Couldn’t load reports: ${esc(e.message)}</div>`; }
+}
+
 async function loadConfig() {
   try { state.config = await api('GET', '/api/config'); } catch {}
 }

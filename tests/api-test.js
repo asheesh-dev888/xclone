@@ -15,6 +15,7 @@ function client() {
   return c;
 }
 (async () => {
+  if (process.env.API_ONLY === 'safety') { await safetyTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'video') { await videoTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); } // quick run of one section
   const u = 'tester' + Math.floor(Math.random() * 1e5);
   const a = client(), d = client();
@@ -77,6 +78,7 @@ function client() {
   await adminTests();
   await idealTests();
   await videoTests();
+  await safetyTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
 
@@ -1091,4 +1093,90 @@ async function videoTests() {
   } finally {
     on.child.kill(); off.child.kill(); bad.child.kill(); await mock.close(); require('./cloudinary-server').cleanup();
   }
+}
+
+// ---------- Account deletion + reports ----------
+async function safetyTests() {
+  console.log('\n  Account deletion + reports');
+  let r = await fetch(BASE + '/delete-account'); let html = await r.text();
+  ok(r.status === 200 && /Delete your ZuZu account/.test(html) && /\/settings/.test(html), 'public /delete-account page explains how to delete');
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) { console.log('  (skipping server tests: needs a local server)'); return; }
+  const { startApp } = require('./ai-server');
+  const { localDbUrl } = require('./google-server');
+  const crypto = require('crypto');
+  const TOKEN = crypto.randomBytes(24).toString('hex');
+  const rnd = Math.floor(Math.random() * 1e6);
+  const admName = 'repadm' + rnd;
+  const app = await startApp({ port: 4220, env: { ADMIN_USERNAMES: admName, ADMIN_TOKEN: TOKEN, REPORT_RATE_MAX: '4' } });
+  const { Client } = require('pg');
+  const pg = new Client({ connectionString: localDbUrl() }); await pg.connect();
+  const mk = () => { let cookie = ''; return async (method, p, body) => {
+    const hd = {}; if (cookie) hd.cookie = cookie; let b;
+    if (body instanceof FormData) b = body; else if (body) { hd['content-type'] = 'application/json'; b = JSON.stringify(body); }
+    const res = await fetch(app.url + p, { method, headers: hd, body: b });
+    const sc = res.headers.get('set-cookie'); if (sc && /sid=/.test(sc)) cookie = sc.split(';')[0];
+    let data = {}; try { data = await res.json(); } catch {} return { status: res.status, data };
+  }; };
+  try {
+    const a = mk(), b = mk(), adm = mk(), anon = mk();
+    const ua = 'del_a' + rnd, ub = 'del_b' + rnd;
+    await a('POST', '/api/signup', { username: ua, password: 'secret123' });
+    await b('POST', '/api/signup', { username: ub, password: 'secret123' });
+    await adm('POST', '/api/signup', { username: admName, password: 'secret123' });
+    // content owned by A: post with image, a video post, DM with image, follow, like
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+    const fd = new FormData(); fd.append('text', 'post to delete'); fd.append('image', new Blob([png], { type: 'image/png' }), 'x.png');
+    const post = (await a('POST', '/api/posts', fd)).data.post;
+    const vpost = (await a('POST', '/api/posts', (() => { const f = new FormData(); f.append('text', 'video holder'); return f; })())).data.post;
+    const pid = 'zuzu/deltest_' + rnd;
+    await pg.query(`INSERT INTO post_videos(post_id,public_id,cloud_name,duration,created_at) VALUES ($1,$2,'testcloud',3,$3)`, [vpost.id, pid, Date.now()]);
+    const bp = (await b('POST', '/api/posts', (() => { const f = new FormData(); f.append('text', 'B post'); return f; })())).data.post;
+    await a('POST', `/api/posts/${bp.id}/like`); await a('POST', `/api/users/${ub}/follow`);
+    const conv = (await a('POST', '/api/dm/conversations', { username: ub })).data.conversation;
+    const dfd = new FormData(); dfd.append('text', 'dm img'); dfd.append('image', new Blob([png], { type: 'image/png' }), 'x.png');
+    const dm = (await a('POST', `/api/dm/conversations/${conv.id}/messages`, dfd)).data.message;
+
+    // reports
+    r = await anon('POST', '/api/reports', { type: 'post', id: post.id, reason: 'spam' }); ok(r.status === 401, 'report needs login');
+    r = await b('POST', '/api/reports', { type: 'post', id: post.id, reason: 'bogus' }); ok(r.status === 400, 'unknown reason rejected');
+    r = await b('POST', '/api/reports', { type: 'nope', id: post.id, reason: 'spam' }); ok(r.status === 400, 'unknown type rejected');
+    r = await b('POST', '/api/reports', { type: 'post', id: 2 ** 31 - 2, reason: 'spam' }); ok(r.status === 404, 'missing post -> 404');
+    r = await b('POST', '/api/reports', { type: 'post', id: bp.id, reason: 'spam' }); ok(r.status === 400, 'cannot report your own post');
+    r = await b('POST', '/api/reports', { type: 'post', id: post.id, reason: 'abuse', note: 'mean words' }); ok(r.status === 201, 'report a post (201)');
+    r = await b('POST', '/api/reports', { type: 'post', id: post.id, reason: 'spam' }); ok(r.status === 200 && r.data.duplicate, 'duplicate open report is not stored twice');
+    r = await b('POST', '/api/reports', { type: 'user', username: ua, reason: 'hate' }); ok(r.status === 201, 'report a profile by username');
+    r = await b('POST', '/api/reports', { type: 'message', id: dm.id, reason: 'nudity' }); ok(r.status === 201, 'report a DM message you received');
+    r = await adm('POST', '/api/reports', { type: 'message', id: dm.id, reason: 'spam' }); ok(r.status === 404, 'cannot report a message from someone else\'s conversation');
+    r = await b('POST', '/api/reports', { type: 'post', id: vpost.id, reason: 'other' }); ok(r.status === 201, '4th report ok');
+    r = await b('POST', '/api/reports', { type: 'user', username: admName, reason: 'other' }); ok(r.status === 429, 'report rate limit (REPORT_RATE_MAX) -> 429');
+    // admin queue
+    r = await b('GET', '/api/admin/reports'); ok(r.status === 404, 'non-admin cannot list reports (404)');
+    r = await adm('GET', '/api/admin/reports');
+    const mine = (r.data.reports || []).filter(x => x.reporter === ub);
+    ok(r.status === 200 && mine.length === 4 && mine.some(x => x.type === 'post' && x.reason_label === 'Abuse or harassment' && x.note === 'mean words' && x.snapshot === 'post to delete'), 'admin sees reports with reason, note and a snapshot');
+    const rid = mine.find(x => x.type === 'user').id;
+    r = await anon('POST', `/api/admin/reports/${rid}/resolve`); ok(r.status === 404, 'resolve needs admin');
+    r = await adm('POST', `/api/admin/reports/${rid}/resolve`); ok(r.status === 200, 'admin resolves a report');
+    r = await (await fetch(app.url + '/api/admin/reports?status=resolved', { headers: { authorization: 'Bearer ' + TOKEN } })).json();
+    ok(r.reports.some(x => x.id === rid && x.status === 'resolved'), 'resolved report listed under ?status=resolved (bearer token)');
+
+    // deletion
+    r = await a('DELETE', '/api/me', { confirm: 'wrong' }); ok(r.status === 400, 'delete needs username/password confirmation');
+    r = await anon('DELETE', '/api/me', { confirm: ua }); ok(r.status === 401, 'delete needs login');
+    const imgId = post.image.slice(7);
+    r = await a('DELETE', '/api/me', { confirm: 'secret123' }); ok(r.status === 200 && r.data.deleted === ua, 'delete account with password confirmation');
+    r = await a('GET', '/api/me'); ok(r.data.user === null, 'session is gone after deletion');
+    r = await anon('POST', '/api/login', { username: ua, password: 'secret123' }); ok(r.status === 401, 'cannot log in to a deleted account');
+    const q1 = async (sql, p) => (await pg.query(sql, p)).rows[0].n;
+    ok(await q1('SELECT COUNT(*)::int n FROM posts p JOIN users u ON u.id=p.user_id WHERE u.username=$1', [ua]) === 0, 'posts deleted');
+    ok(await q1('SELECT COUNT(*)::int n FROM media WHERE id=$1', [imgId]) === 0 && (await fetch(app.url + post.image)).status === 404, 'uploaded post image deleted');
+    ok(await q1('SELECT COUNT(*)::int n FROM dm_messages WHERE id=$1', [dm.id]) === 0 && await q1('SELECT COUNT(*)::int n FROM media WHERE id=$1', [dm.image.slice(7)]) === 0, 'DMs and DM images deleted');
+    ok(await q1('SELECT COUNT(*)::int n FROM video_deletions WHERE public_id=$1', [pid]) === 1, 'their Cloudinary video is queued for destroy');
+    ok(await q1('SELECT COUNT(*)::int n FROM likes l JOIN posts p ON p.id=l.post_id WHERE p.id=$1', [bp.id]) === 0 && (await b('GET', `/api/users/${ub}`)).data.user.followers === 0, 'likes and follows removed');
+    ok(await q1('SELECT COUNT(*)::int n FROM reports WHERE target_type=$1 AND target_id=$2', ['post', post.id]) >= 1, 'reports about their content stay for moderators');
+    r = await b('DELETE', '/api/me', { confirm: '@' + ub.toUpperCase() }); ok(r.status === 200, 'delete by typing @USERNAME (case-insensitive)');
+    ok(await q1('SELECT COUNT(*)::int n FROM reports r JOIN users u ON u.id=r.reporter_id WHERE u.username=$1', [ub]) === 0, 'reports filed by a deleted user go with them');
+    await adm('DELETE', '/api/me', { confirm: admName });
+    await pg.query('DELETE FROM video_deletions WHERE public_id=$1', [pid]);
+  } finally { await pg.end(); app.child.kill(); }
 }

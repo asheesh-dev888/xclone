@@ -161,3 +161,22 @@ CREATE TABLE IF NOT EXISTS video_deletions(
   attempts INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
   created_at BIGINT NOT NULL);
+
+-- Reports (posts, profiles, DM messages) for moderation on /admin.
+CREATE TABLE IF NOT EXISTS reports(
+  id SERIAL PRIMARY KEY,
+  reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_type TEXT NOT NULL,
+  target_id INTEGER NOT NULL,
+  target_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reason TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  snapshot TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at BIGINT NOT NULL,
+  resolved_at BIGINT,
+  resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS reports_status_idx ON reports(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS reports_reporter_idx ON reports(reporter_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS reports_open_unique ON reports(reporter_id, target_type, target_id) WHERE status = 'open';

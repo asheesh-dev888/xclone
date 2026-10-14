@@ -12,6 +12,7 @@ const admin = require('./admin');
 const ideals = require('./ideals');
 const monkey = require('./monkey');
 const video = require('./video');
+const safety = require('./safety');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -674,6 +675,9 @@ video.register(app, { auth, h, db, getPosts });
 
 // ---------- Momo the monkey: short cached thoughts on posts (Groq once per post, local fallback) ----------
 monkey.register(app, { auth, h, db, postIdParam });
+
+// ---------- Account deletion + reports ----------
+safety.register(app, { auth, h, db });
 
 // ---------- Admin dashboard (ADMIN_USERNAMES / ADMIN_TOKEN; 404 for everyone else) ----------
 admin.register(app, { h, db, root: ROOT });

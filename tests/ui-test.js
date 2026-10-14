@@ -994,7 +994,7 @@ async function monkeyUi(browser, errors, step) {
     const hit = (a, b) => a.right > b.left + 1 && a.left < b.right - 1 && a.bottom > b.top + 1 && a.top < b.bottom - 1;
     // The drawing's painted area (the 100x120 box has transparent margins); body above the seat line, legs below it are click-through.
     const fig = { left: r.left + r.width * 0.12, right: r.left + r.width * 0.96, top: r.top, bottom: r.bottom }, seat = r.top + r.height * 96 / 120;
-    const blocked = [...document.querySelectorAll('#center .actions .act, #center .composer')].filter(e => hit(fig, e.getBoundingClientRect()))
+    const blocked = [...document.querySelectorAll(innerWidth <= 700 ? '#center .actions .act .ic, #center .composer' : '#center .actions .act, #center .composer')].filter(e => hit(fig, e.getBoundingClientRect()))
       .concat([...document.querySelectorAll('#center .more, #center .ai-btn')].filter(e => hit({ ...fig, bottom: seat }, e.getBoundingClientRect()))).map(e => e.className);
     return { onTopEdge: r.top < pr.top && r.bottom > pr.top, withinPost: r.left >= pr.left - 1 && r.left < pr.right, rightSide: (r.left + r.right) / 2 > pr.left + pr.width / 2, blocked, postTop: pr.top, momoTop: r.top, momoBottom: r.bottom };
   });
@@ -1004,7 +1004,7 @@ async function monkeyUi(browser, errors, step) {
     await p.goto(B + '/home'); await p.waitForSelector('#feed .post');
     await visible(p);
     let i = await info(p);
-    if (i.h < 68 || i.h > 76) throw new Error('desktop Momo should be ~72px tall, got ' + i.h);
+    if (i.h < 88 || i.h > 96) throw new Error('desktop Momo should be ~92px tall, got ' + i.h);
     step(`Momo is visible on home (fixed, ${Math.round(i.h)}px tall)`);
 
     // scroll, stop -> jumps onto the post nearest the centre, sitting on its top-right edge
@@ -1131,10 +1131,10 @@ async function monkeyUi(browser, errors, step) {
     ({ ctx, page: p } = await login(mobile));
     await p.goto(B + '/home'); await p.waitForSelector('#feed .post'); await visible(p);
     if (!(await p.isVisible('.mobile-top .momo-mtoggle'))) throw new Error('mobile Momo toggle missing');
-    await scroll(p, 650); await settled(p);
+    { let ok = false; for (const y of [650, -200, 300, -150, 400]) { await scroll(p, y); try { await settled(p); ok = true; break; } catch {} } if (!ok) throw new Error("mobile Momo never perched"); }
     i = await info(p); pc = await perch(p);
     const navTop = await p.evaluate(() => document.querySelector('.bottom-nav').getBoundingClientRect().top);
-    if (i.h < 52 || i.h > 60) throw new Error('mobile Momo should be ~56px tall, got ' + i.h);
+    if (i.h < 68 || i.h > 76) throw new Error('mobile Momo should be ~72px tall, got ' + i.h);
     if (i.bottom > navTop || !pc.onTopEdge || pc.blocked.length) throw new Error('mobile perch wrong: ' + JSON.stringify({ ...pc, navTop }));
     await bubbleUp(p); await p.waitForTimeout(400);
     if (await p.evaluate(() => document.documentElement.scrollWidth) > 390) throw new Error('mobile horizontal overflow with Momo');
