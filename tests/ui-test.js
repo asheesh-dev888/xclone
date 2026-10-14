@@ -24,6 +24,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     return c;
   };
   const errors = [];
+  if (process.env.UI_ONLY === 'settings') { await settingsUi(browser, errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'video') { // quick run of one section
     await videoUi(browser, errors, (m) => console.log('  ✓', m));
     console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -195,6 +196,8 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await idealUi(browser, errors, step);
   console.log('\n  Video posts + Reels');
   await videoUi(browser, errors, step);
+  console.log('\n  Settings: language + push');
+  await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
   await browser.close();
   process.exit(errors.length ? 1 : 0);
@@ -1461,4 +1464,36 @@ async function videoUi(browser, errors, step) {
     on.child.kill(); off.child.kill(); await mock.close(); groq.srv.close(); cleanup();
     await clearMockThoughts().catch(() => {});
   }
+}
+
+// ---------- Settings: UI language switch (English / हिंदी / Hinglish), AI language, push opt-in ----------
+async function settingsUi(browser, errors, step) {
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  const name = 'lang' + Math.floor(Math.random() * 1e6);
+  const r = await ctx.request.post(BASE + '/api/signup', { data: { username: name, password: 'secret123', name: 'Lang Tester' } });
+  if (!r.ok()) throw new Error('signup failed');
+  const p = await ctx.newPage();
+  p.on('pageerror', e => errors.push(e.message)); p.on('dialog', d => d.accept());
+  await p.goto(BASE + '/settings'); await p.waitForSelector('#set-ui-lang');
+  if (!(await p.isVisible('#set-push'))) throw new Error('push section missing');
+  await p.selectOption('#set-ui-lang', 'hi');
+  await p.waitForFunction(() => [...document.querySelectorAll('.nav .nav-item')].some(a => a.textContent.includes('होम')), null, { timeout: 4000 });
+  step('switching to हिंदी translates the nav instantly');
+  await p.goto(BASE + '/home'); await p.waitForSelector('#feed');
+  await p.waitForFunction(() => document.body.textContent.includes('सूचनाएँ'), null, { timeout: 4000 });
+  const prefs = await (await ctx.request.get(BASE + '/api/me/prefs')).json();
+  if (prefs.ui_lang !== 'hi') throw new Error('ui_lang not saved: ' + JSON.stringify(prefs));
+  step('the choice is saved on the account and survives navigation');
+  await p.goto(BASE + '/settings'); await p.waitForSelector('#set-ui-lang');
+  await p.selectOption('#set-ui-lang', 'hinglish');
+  await p.waitForFunction(() => document.body.textContent.includes('Bhasha') && !document.body.textContent.includes('भाषा'), null, { timeout: 4000 });
+  await p.selectOption('#set-ai-lang', 'hi');
+  await p.waitForFunction(async () => (await (await fetch('/api/me/prefs')).json()).ai_lang === 'hi', null, { timeout: 4000 });
+  step('Hinglish UI + AI language preference saved');
+  await p.selectOption('#set-ui-lang', 'en');
+  await p.waitForFunction(() => [...document.querySelectorAll('.nav .nav-item')].some(a => a.textContent.includes('Home')), null, { timeout: 4000 });
+  step('back to English restores the original text');
+  await p.screenshot({ path: OUT + '/20-settings.png' });
+  await ctx.request.delete(BASE + '/api/me', { data: { confirm: name } });
+  await ctx.close();
 }

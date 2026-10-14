@@ -755,7 +755,7 @@ async function viewNotifications() {
   try {
     const { items } = await api('GET', '/api/notifications');
     const el = $('#notifs'); if (!el) return;
-    const kinds = { like: ['heartFill', 'liked your post'], reply: ['reply', 'replied to you'], follow: ['userFill', 'followed you'], repost: ['rt', 'reposted your post'] };
+    const kinds = { like: ['heartFill', 'liked your post'], reply: ['reply', 'replied to you'], follow: ['userFill', 'followed you'], repost: ['rt', 'reposted your post'], mention: ['reply', 'mentioned you'] };
     el.innerHTML = items.length ? items.map(n => {
       const [icon, verb] = kinds[n.type] || ['bell', n.type];
       const href = n.type === 'follow' ? '/u/' + n.username : '/post/' + n.post_id;
@@ -2174,7 +2174,7 @@ addEventListener('popstate', momoSync);
 
 // ---------- boot ----------
 async function refreshMe() {
-  try { const r = await api('GET', '/api/me'); state.me = r.user; state.admin = !!r.admin; state.unread = r.unread || 0; state.dmUnread = r.dm_unread || 0; } catch { state.me = null; }
+  try { const r = await api('GET', '/api/me'); state.me = r.user; state.admin = !!r.admin; state.unread = r.unread || 0; state.dmUnread = r.dm_unread || 0; state.prefs = r.prefs || null; if (state.prefs && window.ZUZU_I18N && state.prefs.ui_lang !== ZUZU_I18N.get()) ZUZU_I18N.set(state.prefs.ui_lang); } catch { state.me = null; }
 }
 setInterval(async () => {
   if (!state.me || document.hidden) return;
@@ -2194,13 +2194,64 @@ function viewSettings() {
     <div class="settings" id="settings">
       <section class="set-sec" id="set-account"><h2>Account</h2><p class="muted">Signed in as <b>@${esc(u.username)}</b></p>
         <button class="btn btn-outline" data-action="logout">${ic('logout')} Log out</button></section>
+      <section class="set-sec" id="set-lang"><h2>Language</h2>
+        <div class="field"><label for="set-ui-lang">App language</label><select id="set-ui-lang" data-pref="ui_lang">${[['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ui_lang || ZUZU_I18N.get()) === k ? ' selected' : ''} data-noi18n>${l}</option>`).join('')}</select></div>
+        <div class="field"><label for="set-ai-lang">AI language</label><p class="muted small">ZuZu AI answers and Momo’s thoughts</p><select id="set-ai-lang" data-pref="ai_lang">${[['auto', 'Same as the post'], ['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ai_lang || 'auto') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div></section>
+      <section class="set-sec" id="set-push"><h2>Push notifications</h2><p class="muted" id="push-status">Get notified about likes, replies, follows, mentions and messages.</p>
+        <button class="btn btn-outline" data-action="push-toggle" id="push-btn" hidden></button></section>
       <section class="set-sec danger-zone" id="set-delete"><h2>Delete account</h2>
         <p class="muted">This permanently deletes your profile, posts, replies, likes, follows, photos, videos and messages. It can’t be undone. <a class="link" href="/delete-account" target="_blank" rel="noopener">What gets deleted</a></p>
         <form data-form="delete-account" autocomplete="off"><div class="field"><label for="del-confirm">Type <b>${esc(u.username)}</b> (or your password) to confirm</label>
           <input id="del-confirm" name="confirm" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${esc(u.username)}"></div>
           <button class="btn btn-danger" type="submit" disabled>Delete my account</button></form></section>
     </div>`, { active: '' });
+  pushStatus();
 }
+// ---- Language preferences (saved on the account; the UI language also in localStorage) ----
+document.addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-pref]'); if (!sel) return;
+  const key = sel.dataset.pref;
+  try {
+    state.prefs = await api('PUT', '/api/me/prefs', { [key]: sel.value });
+    if (key === 'ui_lang') ZUZU_I18N.set(sel.value);
+    if (key === 'ai_lang') { momo.thoughts.clear(); try { sessionStorage.removeItem('zuzu.momoThoughts'); } catch {} }
+    toast(ZUZU_I18N.t('Saved'));
+  } catch (err) { toast(err.message); }
+});
+// ---- Web Push opt-in ----
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const b64u = (s) => { const p = '='.repeat((4 - s.length % 4) % 4), b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+async function pushSub() { const reg = await navigator.serviceWorker.getRegistration('/'); return reg ? reg.pushManager.getSubscription() : null; }
+async function pushStatus() {
+  const st = $('#push-status'), btn = $('#push-btn'); if (!st) return;
+  if (!pushSupported()) { st.textContent = 'This browser doesn’t support push notifications.'; return; }
+  const cfg = await api('GET', '/api/push/key').catch(() => ({}));
+  if (!cfg.enabled) { st.textContent = 'Push notifications aren’t set up on this server yet.'; return; }
+  const sub = await pushSub().catch(() => null);
+  if (Notification.permission === 'denied') { st.textContent = 'Notifications are blocked for ZuZu in your browser settings.'; btn.hidden = true; return; }
+  btn.hidden = false; btn.dataset.on = sub ? '1' : '';
+  btn.textContent = ZUZU_I18N.t(sub ? 'Turn off notifications' : 'Turn on notifications');
+  st.textContent = sub ? 'On for this browser: likes, replies, follows, mentions and messages.' : 'Get notified about likes, replies, follows, mentions and messages.';
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-action="push-toggle"]'); if (!b) return;
+  e.stopImmediatePropagation(); b.disabled = true;
+  try {
+    if (b.dataset.on) {
+      const sub = await pushSub();
+      if (sub) { await api('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint }); await sub.unsubscribe(); }
+    } else {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') throw new Error('Notifications were not allowed');
+      const { key } = await api('GET', '/api/push/key');
+      const reg = await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(key) });
+      await api('POST', '/api/push/subscribe', { subscription: sub.toJSON() });
+      toast('Notifications are on');
+    }
+  } catch (err) { toast(err.message); }
+  b.disabled = false; pushStatus();
+}, true);
 document.addEventListener('input', (e) => {
   const f = e.target.closest('form[data-form="delete-account"]'); if (!f) return;
   $('button[type="submit"]', f).disabled = !f.confirm.value.trim();

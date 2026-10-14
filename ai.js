@@ -26,12 +26,18 @@ const ACTIONS = {
 };
 const CACHEABLE = new Set(['explain', 'context']);
 
-function systemPrompt(nonce, langName) {
+// The user's AI language preference (Settings): overrides the reply language.
+const STYLE = {
+  en: 'Always reply in English, whatever language the post or question is in (translations still go into the requested language).',
+  hi: 'Always reply in Hindi written in Devanagari script, whatever language the post or question is in (translations still go into the requested language).',
+  hinglish: 'Always reply in Hinglish: casual Hindi written in Roman (Latin) letters, mixed naturally with English words, like Indian users text each other (translations still go into the requested language).',
+};
+function systemPrompt(nonce, langName, style) {
   return `You are ZuZu AI, a helpful, concise and neutral assistant built into ZuZu, a social app. You help people understand one post and the conversation around it.
 
 Rules:
 - Language: reply in the language the user writes their question in. For quick actions (no typed question) reply in ${langName}, unless the task is a translation into a specific language.
-- Be concise: usually under 150 words. Use short paragraphs or "-" bullet lists and **bold** sparingly. Only include links you are confident exist.
+${STYLE[style] ? `- USER PREFERENCE (highest priority for language): ${STYLE[style]}\n` : ''}- Be concise: usually under 150 words. Use short paragraphs or "-" bullet lists and **bold** sparingly. Only include links you are confident exist.
 - Be neutral and fair on political, religious and other contested topics: present the main viewpoints, don't take sides, don't insult anyone.
 - If you are unsure, or the post is ambiguous, say so plainly. Never invent facts, quotes, numbers or sources.
 - You cannot browse the web and have no access to news after your training data. If a fact-check or question needs recent or live information, say that you can't verify it without current sources and suggest checking reliable sources.
@@ -85,7 +91,7 @@ function buildMessages(ctx, req, nonce) {
     ? `Quick action: ${ACTIONS[req.action].label}. ${ACTIONS[req.action].prompt}`
     : `My question about this post: ${req.question}`;
   return [
-    { role: 'system', content: systemPrompt(nonce, langName(req.lang)) },
+    { role: 'system', content: systemPrompt(nonce, langName(req.lang), req.style) },
     { role: 'user', content: contextBlock(ctx, nonce) },
     ...req.history,
     { role: 'user', content: task },
@@ -145,12 +151,13 @@ function register(app, { auth, h, db, postIdParam }) {
     const id = postIdParam(req, res); if (!id) return;
     const parsed = parseBody(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
+    parsed.style = STYLE[req.user.ai_lang] ? req.user.ai_lang : null;
 
     let post = await db.get('SELECT p.*, u.username, u.name, v.duration video_duration, v.is_reel video_is_reel FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN post_videos v ON v.post_id=p.id WHERE p.id=$1', [id]);
     if (post && post.repost_of) post = await db.get('SELECT p.*, u.username, u.name, v.duration video_duration, v.is_reel video_is_reel FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN post_videos v ON v.post_id=p.id WHERE p.id=$1', [post.repost_of]);
     if (!post) return res.status(404).json({ error: 'Post not found' });
 
-    const cacheKey = parsed.action && CACHEABLE.has(parsed.action) && !parsed.history.length ? `${post.id}:${parsed.action}:${parsed.lang}:${model()}` : null;
+    const cacheKey = parsed.action && CACHEABLE.has(parsed.action) && !parsed.history.length ? `${post.id}:${parsed.action}:${parsed.lang}:${parsed.style || ''}:${model()}` : null;
     const hit = cacheKey && cacheGet(cacheKey);
     if (!hit) {
       const wait = rateCheck(req.user.id);
@@ -247,4 +254,4 @@ function register(app, { auth, h, db, postIdParam }) {
 const reasoningParams = (m) => (/gpt-oss/i.test(m) ? { reasoning_effort: 'low', include_reasoning: false } : /qwen/i.test(m) ? { reasoning_effort: 'none' } : {});
 const reasoningHeadroom = (m) => (/gpt-oss|qwen/i.test(m) ? REASONING_HEADROOM : 0);
 
-module.exports = { enabled, model, baseUrl, register, parseBody, ACTIONS, DEFAULT_MODEL, QUESTION_MAX, REASONING_HEADROOM, reasoningParams, reasoningHeadroom };
+module.exports = { STYLE, enabled, model, baseUrl, register, parseBody, ACTIONS, DEFAULT_MODEL, QUESTION_MAX, REASONING_HEADROOM, reasoningParams, reasoningHeadroom };

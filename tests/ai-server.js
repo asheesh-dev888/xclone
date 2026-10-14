@@ -93,7 +93,8 @@ async function clearMockThoughts() {
   const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
   const c = new Client({ connectionString: localDbUrl() });
   await c.connect();
-  try { await c.query('UPDATE posts SET monkey_thought=NULL WHERE monkey_thought = ANY($1::text[]) OR monkey_thought LIKE $2', [MOCK_THOUGHTS, 'Oh wow, this is such a wonderfully long%']); }
+  try { await c.query('UPDATE posts SET monkey_thought=NULL WHERE monkey_thought = ANY($1::text[]) OR monkey_thought LIKE $2', [MOCK_THOUGHTS, 'Oh wow, this is such a wonderfully long%']);
+    await c.query('DELETE FROM monkey_thoughts WHERE thought = ANY($1::text[]) OR thought LIKE $2', [MOCK_THOUGHTS, 'Oh wow, this is such a wonderfully long%']).catch(() => {}); }
   finally { await c.end(); }
 }
 

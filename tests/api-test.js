@@ -15,6 +15,7 @@ function client() {
   return c;
 }
 (async () => {
+  if (process.env.API_ONLY === 'push') { await pushTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'safety') { await safetyTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'video') { await videoTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); } // quick run of one section
   const u = 'tester' + Math.floor(Math.random() * 1e5);
@@ -79,6 +80,7 @@ function client() {
   await idealTests();
   await videoTests();
   await safetyTests();
+  await pushTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
 
@@ -1179,4 +1181,94 @@ async function safetyTests() {
     await adm('DELETE', '/api/me', { confirm: admName });
     await pg.query('DELETE FROM video_deletions WHERE public_id=$1', [pid]);
   } finally { await pg.end(); app.child.kill(); }
+}
+
+async function pushTests() {
+  console.log('\n  Web Push + language preferences');
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) { console.log('  (skipping: needs a local server)'); return; }
+  const http = require('http'), crypto = require('crypto'), webpush = require('web-push');
+  const { startApp, startMockGroq, MOCK_KEY } = require('./ai-server');
+  // fake push service: records what ZuZu sends
+  const got = [];
+  const ps = http.createServer((req, res) => { let n = 0; req.on('data', c => n += c.length); req.on('end', () => { got.push({ path: req.url, headers: req.headers, size: n }); res.writeHead(req.url.includes('gone') ? 410 : 201); res.end(); }); });
+  await new Promise(r => ps.listen(0, '127.0.0.1', r));
+  const pushUrl = (k) => `http://127.0.0.1:${ps.address().port}/${k}`;
+  const vk = webpush.generateVAPIDKeys();
+  const mock = await startMockGroq({ chunkDelay: 1 });
+  const app = await startApp({ port: 4221, ai: { baseUrl: mock.url }, env: { VAPID_PUBLIC_KEY: vk.publicKey, VAPID_PRIVATE_KEY: vk.privateKey, PUSH_ALLOW_HTTP: '1' } });
+  const off = await startApp({ port: 4222, env: { VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '' } });
+  const mk = (base) => { let cookie = ''; return async (method, p, body, raw) => {
+    const hd = {}; if (cookie) hd.cookie = cookie; let b;
+    if (body instanceof FormData) b = body; else if (body) { hd['content-type'] = 'application/json'; b = JSON.stringify(body); }
+    const res = await fetch(base + p, { method, headers: hd, body: b });
+    const sc = res.headers.get('set-cookie'); if (sc && /sid=/.test(sc)) cookie = sc.split(';')[0];
+    if (raw) return { status: res.status, text: await res.text() };
+    let data = {}; try { data = await res.json(); } catch {} return { status: res.status, data };
+  }; };
+  const sub = (k) => { const e = crypto.createECDH('prime256v1'); e.generateKeys(); return { endpoint: pushUrl(k), keys: { p256dh: e.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') } }; };
+  const wait = async (n, ms = 4000) => { const t = Date.now(); while (got.length < n && Date.now() - t < ms) await new Promise(r => setTimeout(r, 50)); await new Promise(r => setTimeout(r, 150)); };
+  const post = (fn, text) => { const f = new FormData(); f.append('text', text); return fn('POST', '/api/posts', f); };
+  try {
+    const rnd = Math.floor(Math.random() * 1e6), ua = 'push_a' + rnd, ub = 'push_b' + rnd;
+    const a = mk(app.url), b = mk(app.url), anon = mk(app.url);
+    await a('POST', '/api/signup', { username: ua, password: 'secret123', name: 'Push A' });
+    await b('POST', '/api/signup', { username: ub, password: 'secret123', name: 'Push B' });
+    let r = await anon('GET', '/api/push/key');
+    ok(r.data.enabled === true && r.data.key === vk.publicKey && !JSON.stringify(r.data).includes(vk.privateKey), 'public VAPID key served (never the private key)');
+    r = await mk(off.url)('GET', '/api/push/key'); ok(r.data.enabled === false && r.data.key === null, 'push off without VAPID env');
+    ok((await anon('POST', '/api/push/subscribe', { subscription: sub('x') })).status === 401, 'subscribe needs login');
+    ok((await a('POST', '/api/push/subscribe', { subscription: { endpoint: 'ftp://x', keys: { p256dh: 'a', auth: 'b' } } })).status === 400, 'bad subscription rejected');
+    ok((await a('POST', '/api/push/subscribe', { subscription: { endpoint: 'http://evil.example/x', keys: { p256dh: 'a', auth: 'b' } } })).status === 400, 'non-https endpoint rejected');
+    ok((await a('POST', '/api/push/subscribe', { subscription: sub('a1') })).data.ok, 'A subscribes');
+    const sa2 = sub('a2'); await a('POST', '/api/push/subscribe', { subscription: sa2 });
+    await a('POST', '/api/push/subscribe', { subscription: sub('a-gone') });
+    // like -> A (3 subscriptions; the 410 one is pruned)
+    const pa = (await post(a, 'push test post')).data.post;
+    got.length = 0; await b('POST', `/api/posts/${pa.id}/like`); await wait(3);
+    ok(got.length === 3 && got.every(g => /^vapid t=/.test(g.headers.authorization) && g.headers['content-encoding'] === 'aes128gcm' && g.size > 0), 'like → encrypted VAPID push to each of A’s browsers', JSON.stringify(got.map(g => g.path)));
+    const left = await (async () => { const { Client } = require('pg'); const c = new Client({ connectionString: require('./google-server').localDbUrl() }); await c.connect(); const q = await c.query('SELECT endpoint FROM push_subscriptions u JOIN users x ON x.id=u.user_id WHERE x.username=$1', [ua]); await c.end(); return q.rows.map(r => r.endpoint); })();
+    ok(left.length === 2 && !left.some(e => e.includes('gone')), 'expired (410) subscription removed');
+    await a('POST', '/api/push/unsubscribe', { endpoint: sa2.endpoint });
+    got.length = 0; await b('POST', `/api/users/${ua}/follow`); await wait(1);
+    ok(got.length === 1 && got[0].path === '/a1', 'follow → push; unsubscribed browser gets nothing');
+    got.length = 0; await post(b, `hey @${ua} look`); await wait(1);
+    let n = (await a('GET', '/api/notifications')).data.items;
+    ok(got.length === 1 && n.some(x => x.type === 'mention'), '@mention → notification + push');
+    got.length = 0; { const f = new FormData(); f.append('text', 'reply'); f.append('parent_id', pa.id); await b('POST', '/api/posts', f); } await wait(1);
+    ok(got.length === 1, 'reply → push');
+    got.length = 0; { const f = new FormData(); f.append('text', `reply @${ua}`); f.append('parent_id', pa.id); await b('POST', '/api/posts', f); } await wait(1);
+    ok(got.length === 1, 'reply that also mentions → one push, not two');
+    const conv = (await b('POST', '/api/dm/conversations', { username: ua })).data.conversation;
+    got.length = 0; await b('POST', `/api/dm/conversations/${conv.id}/messages`, { text: 'hi there' }); await wait(1);
+    ok(got.length === 1, 'DM → push');
+    got.length = 0; await a('POST', `/api/posts/${pa.id}/like`); await wait(0, 600);
+    ok(got.length === 0, 'liking your own post → no push');
+    // prefs
+    r = await a('GET', '/api/me'); ok(r.data.prefs && r.data.prefs.ui_lang === 'en' && r.data.prefs.ai_lang === 'auto', '/api/me has default prefs');
+    ok((await a('PUT', '/api/me/prefs', { ui_lang: 'klingon' })).status === 400, 'unknown language rejected');
+    r = await a('PUT', '/api/me/prefs', { ui_lang: 'hi', ai_lang: 'hinglish' }); ok(r.data.ui_lang === 'hi' && r.data.ai_lang === 'hinglish', 'prefs saved');
+    ok((await anon('PUT', '/api/me/prefs', { ui_lang: 'hi' })).status === 401, 'prefs need login');
+    // push text in the recipient's UI language
+    got.length = 0; await b('DELETE', `/api/users/${ua}/follow`); await b('POST', `/api/users/${ua}/follow`); await wait(1);
+    ok(got.length === 1, 'push still sent after language change');
+    const pushMod = require('../push');
+    ok(pushMod.title('hi', 'follow', 'Ravi') === 'Ravi ने आपको फ़ॉलो किया' && pushMod.title('hinglish', 'dm', 'Ravi') === 'Ravi ka naya message', 'push titles localised (hi / hinglish)');
+    // AI style preference reaches ZuZu AI + Momo prompts
+    mock.calls.length = 0;
+    const ar = await a('POST', `/api/ai/post/${pa.id}`, { action: 'explain' }, true);
+    const sys = mock.calls.length && mock.calls[0].body.messages[0].content;
+    ok(ar.status === 200 && /Hinglish/.test(sys) && /USER PREFERENCE/.test(sys), 'ZuZu AI system prompt carries the Hinglish preference');
+    mock.calls.length = 0;
+    const t1 = (await a('GET', `/api/monkey/thought/${pa.id}`)).data;
+    ok(t1.source === 'ai' && /always reply in Hinglish/.test(mock.calls[0].body.messages[0].content), 'Momo thought generated in the chosen style');
+    const t2 = (await a('GET', `/api/monkey/thought/${pa.id}`)).data;
+    ok(t2.source === 'cache' && t2.thought === t1.thought, 'styled Momo thought cached per (post, language)');
+    const tb = (await b('GET', `/api/monkey/thought/${pa.id}`)).data;
+    ok(tb.source === 'ai' && !/always reply in Hinglish/.test(mock.calls[mock.calls.length - 1].body.messages[0].content), 'other users (auto) get their own thought');
+    // index.html loads the translator; sw handles push
+    const html = (await anon('GET', '/', null, true)).text, sw = (await anon('GET', '/sw.js', null, true)).text;
+    ok(/\/i18n\.js/.test(html) && /addEventListener\('push'/.test(sw) && /notificationclick/.test(sw) && /zuzu-v1[1-9]/.test(sw), 'i18n script + SW push handlers + cache bumped');
+    await a('DELETE', '/api/me', { confirm: ua }); await b('DELETE', '/api/me', { confirm: ub });
+    if (fail && process.env.API_ONLY === 'push') console.log(app.log().slice(-1500));
+  } finally { app.child.kill(); off.child.kill(); mock.srv.close(); ps.close(); }
 }

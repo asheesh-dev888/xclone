@@ -764,3 +764,6 @@ body.reels-page .fab{display:none}
 .msg.theirs .msg-report{order:2}
 .rep-snap{color:var(--muted);font-size:13px;max-width:320px;overflow-wrap:anywhere}
 .rep-tabs{margin-left:auto;display:flex;gap:6px}.rep-tabs .pill{cursor:pointer;text-transform:capitalize}.rep-tabs .pill.on{background:var(--blue);color:#fff}
+.set-sec select{width:100%;background:var(--bg,#000);color:inherit;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font:inherit;margin-top:6px}
+.set-sec .small{font-size:13px;margin:2px 0 0}
+#push-btn[hidden]{display:none}

@@ -180,3 +180,22 @@ CREATE TABLE IF NOT EXISTS reports(
 CREATE INDEX IF NOT EXISTS reports_status_idx ON reports(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS reports_reporter_idx ON reports(reporter_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS reports_open_unique ON reports(reporter_id, target_type, target_id) WHERE status = 'open';
+
+-- Web Push subscriptions (VAPID) + per-user language preferences.
+CREATE TABLE IF NOT EXISTS push_subscriptions(
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at BIGINT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint ON push_subscriptions(endpoint);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ui_lang TEXT NOT NULL DEFAULT 'en';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_lang TEXT NOT NULL DEFAULT 'auto';
+-- Momo thoughts in a chosen language style (hi / hinglish / en); 'auto' keeps using posts.monkey_thought.
+CREATE TABLE IF NOT EXISTS monkey_thoughts(
+  post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  lang TEXT NOT NULL,
+  thought TEXT NOT NULL,
+  PRIMARY KEY(post_id, lang));

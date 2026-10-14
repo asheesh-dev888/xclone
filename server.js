@@ -13,6 +13,7 @@ const ideals = require('./ideals');
 const monkey = require('./monkey');
 const video = require('./video');
 const safety = require('./safety');
+const push = require('./push');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -110,7 +111,7 @@ app.get('/api/me', h(async (req, res) => {
   const { c } = await db.get('SELECT COUNT(*)::int c FROM notifications WHERE user_id=$1 AND NOT read', [req.user.id]);
   const dm = await db.get(`SELECT COUNT(*)::int n FROM dm_members mb JOIN dm_messages m ON m.conversation_id=mb.conversation_id
     WHERE mb.user_id=$1 AND m.sender_id<>$1 AND m.created_at>mb.last_read_at`, [req.user.id]);
-  const out = { user: publicUser(req.user), unread: c, dm_unread: dm.n };
+  const out = { user: publicUser(req.user), unread: c, dm_unread: dm.n, prefs: { ui_lang: req.user.ui_lang || 'en', ai_lang: req.user.ai_lang || 'auto' } };
   if (admin.isAdminUser(req.user)) out.admin = true; // only admins see the flag (and the Admin nav item)
   res.json(out);
 }));
@@ -267,10 +268,13 @@ app.get('/api/feed/explore', h(async (req, res) => {
   res.json({ items: await hydrate(rows, me) });
 }));
 
-async function notify(userId, actorId, type, postId, client) {
+async function notify(userId, actorId, type, postId, client, queue) {
   if (userId === actorId) return;
   await db.run('INSERT INTO notifications(user_id,actor_id,type,post_id,created_at) VALUES ($1,$2,$3,$4,$5)', [userId, actorId, type, postId || null, now()], client);
+  // Inside a transaction the caller passes `queue` and sends after commit (a rollback never notifies).
+  if (queue) queue.push([userId, type, actorId, postId]); else push.send(userId, type, { actorId, postId });
 }
+const flushPush = (queue) => { for (const [u, t, a, p] of queue) push.send(u, t, { actorId: a, postId: p }); };
 
 app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
   const text = String(req.body.text || '').trim();
@@ -291,7 +295,7 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
     try { vid = await video.verify(req.body.video, { userId: req.user.id, isReel }); }
     catch (e) { if (e.expose) return res.status(e.status).json({ error: e.message }); throw e; }
   }
-  let id;
+  let id; const pushQ = [];
   try {
     id = await db.tx(async (c) => {
       const { id } = await db.get('INSERT INTO posts(user_id,text,parent_id,created_at) VALUES ($1,$2,$3,$4) RETURNING id', [req.user.id, text, parentId, now()], c);
@@ -300,13 +304,15 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
         await db.run('UPDATE posts SET image=$1 WHERE id=$2', [url, id], c);
       }
       if (vid) await video.insert(db, c, id, vid, isReel);
-      if (parent) await notify(parent.user_id, req.user.id, 'reply', id, c);
+      if (parent) await notify(parent.user_id, req.user.id, 'reply', id, c, pushQ);
+      for (const uid of await push.mentionedUsers(text, req.user.id)) if (!parent || uid !== parent.user_id) await notify(uid, req.user.id, 'mention', id, c, pushQ);
       return id;
     });
   } catch (e) {
     if (e.code === '23505' && vid) return res.status(409).json({ error: 'That video is already posted' });
     throw e;
   }
+  flushPush(pushQ);
   res.json({ post: await getPost(id, req.user.id) });
 }));
 
@@ -643,6 +649,8 @@ app.post('/api/dm/conversations/:id/messages', dmRateCheck, dmUpload.single('ima
     return m;
   });
   dmRecordSend(req.user.id);
+  { const other = await db.get('SELECT user_id FROM dm_members WHERE conversation_id=$1 AND user_id<>$2', [msg.conversation_id, req.user.id]);
+    if (other) push.send(other.user_id, 'dm', { actorId: req.user.id, conversationId: msg.conversation_id, body: msg.text || '📷 Photo' }); }
   res.status(201).json({ message: dmMessage(msg) });
 }));
 
@@ -675,6 +683,9 @@ video.register(app, { auth, h, db, getPosts });
 
 // ---------- Momo the monkey: short cached thoughts on posts (Groq once per post, local fallback) ----------
 monkey.register(app, { auth, h, db, postIdParam });
+
+// ---------- Web Push + language preferences ----------
+push.register(app, { auth, h, db });
 
 // ---------- Account deletion + reports ----------
 safety.register(app, { auth, h, db });
