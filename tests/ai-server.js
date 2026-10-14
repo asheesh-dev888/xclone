@@ -41,6 +41,7 @@ function startMockGroq({ chunkDelay = 15 } = {}) {
         let content;
         if (/MOCK_LONG/.test(last)) content = '"Momo: Oh wow, this is such a wonderfully long and winding post that I simply cannot stop thinking about it all day 🍌🎉🐒 truly"';
         else if (/MOCK_EMPTY/.test(last)) content = '';
+        else if (/MOCK_MOOD_(\w+)/.test(last)) content = last.match(/MOCK_MOOD_(\w+)/)[1] + '|A mood-tagged thought';
         else content = MOCK_THOUGHTS[(thoughtN++) % MOCK_THOUGHTS.length];
         return json(200, { id: 'mock', object: 'chat.completion', model: j.model, choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
       }

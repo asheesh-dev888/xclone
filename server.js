@@ -111,7 +111,7 @@ app.get('/api/me', h(async (req, res) => {
   const { c } = await db.get('SELECT COUNT(*)::int c FROM notifications WHERE user_id=$1 AND NOT read', [req.user.id]);
   const dm = await db.get(`SELECT COUNT(*)::int n FROM dm_members mb JOIN dm_messages m ON m.conversation_id=mb.conversation_id
     WHERE mb.user_id=$1 AND m.sender_id<>$1 AND m.created_at>mb.last_read_at`, [req.user.id]);
-  const out = { user: publicUser(req.user), unread: c, dm_unread: dm.n, prefs: { ui_lang: req.user.ui_lang || 'en', ai_lang: req.user.ai_lang || 'auto' } };
+  const out = { user: publicUser(req.user), unread: c, dm_unread: dm.n, prefs: { ui_lang: req.user.ui_lang || 'en', ai_lang: req.user.ai_lang || 'auto', momo_outfit: req.user.momo_outfit || null } };
   if (admin.isAdminUser(req.user)) out.admin = true; // only admins see the flag (and the Admin nav item)
   res.json(out);
 }));
@@ -219,12 +219,24 @@ SELECT p.id, p.text, p.image, p.parent_id, p.created_at, p.user_id,
   EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=@me) liked,
   EXISTS(SELECT 1 FROM posts r WHERE r.repost_of=p.id AND r.user_id=@me) reposted,
   (SELECT pu.username FROM posts pp JOIN users pu ON pu.id=pp.user_id WHERE pp.id=p.parent_id) reply_to,
-  ${video.SELECT_COLS}
+  ${video.SELECT_COLS},
+  (SELECT json_build_object('options', pl.options, 'ends_at', pl.ends_at,
+     'counts', (SELECT json_object_agg(x.option_idx, x.n) FROM (SELECT option_idx, COUNT(*)::int n FROM poll_votes WHERE post_id=pl.post_id GROUP BY option_idx) x),
+     'my_vote', (SELECT option_idx FROM poll_votes WHERE post_id=pl.post_id AND user_id=@me)) FROM polls pl WHERE pl.post_id=p.id) poll_raw
 FROM posts p JOIN users u ON u.id=p.user_id ${video.JOIN}`;
+// Poll results are shown only after you vote or when the poll has ended (the total is always shown).
+function pollOut(raw) {
+  if (!raw) return null;
+  const counts = raw.counts || {}, n = raw.options.length;
+  const votes = Array.from({ length: n }, (_, i) => counts[i] || 0), total = votes.reduce((a, b) => a + b, 0);
+  const ended = Date.now() >= Number(raw.ends_at), voted = raw.my_vote != null;
+  return { options: raw.options, ends_at: Number(raw.ends_at), ended, total, my_vote: voted ? raw.my_vote : null, votes: voted || ended ? votes : null };
+}
 // Author's ideal (for the small coloured dot next to names) replaces the raw ideal_* columns.
 function postOut(r) {
   if (!r) return r;
-  const { ideal_name, ideal_preset_id, ideal_qualities, ...p } = video.videoOut(r);
+  const { ideal_name, ideal_preset_id, ideal_qualities, poll_raw, ...p } = video.videoOut(r);
+  p.poll = pollOut(poll_raw);
   const i = ideals.idealOut({ ideal_name, ideal_preset_id, ideal_qualities });
   p.ideal = i ? { name: i.name, primary: i.primary, color: i.color } : null;
   return p;
@@ -279,10 +291,29 @@ const flushPush = (queue) => { for (const [u, t, a, p] of queue) push.send(u, t,
 app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
   const text = String(req.body.text || '').trim();
   const parentId = req.body.parent_id ? parseInt(req.body.parent_id, 10) : null;
-  const hasVideo = req.body.video != null && req.body.video !== '';
+  const hasVoice = req.body.voice != null && req.body.voice !== '';
+  const hasVideo = (req.body.video != null && req.body.video !== '') || hasVoice;
   if (!text && !req.file && !hasVideo) return res.status(400).json({ error: 'Post cannot be empty' });
   if ([...text].length > 280) return res.status(400).json({ error: 'Post is over 280 characters' });
   if (req.file && hasVideo) return res.status(400).json({ error: 'A post can have a photo or a video, not both' });
+  if (hasVoice && req.body.video != null && req.body.video !== '') return res.status(400).json({ error: 'A post can have a video or a voice note, not both' });
+  // Poll: poll_options (JSON array or repeated field) + poll_minutes (60..10080). Top-level posts only.
+  let poll = null;
+  if (req.body.poll_options != null && req.body.poll_options !== '') {
+    let opts = req.body.poll_options;
+    if (typeof opts === 'string') { try { opts = JSON.parse(opts); } catch { opts = null; } }
+    if (!Array.isArray(opts)) return res.status(400).json({ error: 'Invalid poll' });
+    opts = opts.map(o => String(o == null ? '' : o).replace(/\s+/g, ' ').trim());
+    if (opts.length < 2 || opts.length > 4 || opts.some(o => !o)) return res.status(400).json({ error: 'A poll needs 2 to 4 options' });
+    if (opts.some(o => [...o].length > 25)) return res.status(400).json({ error: 'Poll options can be up to 25 characters' });
+    if (new Set(opts.map(o => o.toLowerCase())).size !== opts.length) return res.status(400).json({ error: 'Poll options must be different' });
+    const mins = parseInt(req.body.poll_minutes || '1440', 10);
+    if (!(mins >= 60 && mins <= 7 * 24 * 60)) return res.status(400).json({ error: 'Polls can run from 1 hour to 7 days' });
+    if (parentId) return res.status(400).json({ error: 'Replies can’t have polls' });
+    if (!text) return res.status(400).json({ error: 'Ask a question for your poll' });
+    if (req.file || hasVideo) return res.status(400).json({ error: 'A poll can’t have media' });
+    poll = { opts, ends: now() + mins * 60e3 };
+  }
   let parent = null;
   if (parentId) {
     parent = await db.get('SELECT * FROM posts WHERE id=$1 AND repost_of IS NULL', [parentId]);
@@ -292,7 +323,7 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
   const isReel = hasVideo && !parentId && ['1', 'true', 'on', true].includes(req.body.is_reel);
   let vid = null;
   if (hasVideo) {
-    try { vid = await video.verify(req.body.video, { userId: req.user.id, isReel }); }
+    try { vid = await video.verify(hasVoice ? req.body.voice : req.body.video, { userId: req.user.id, isReel, voice: hasVoice }); }
     catch (e) { if (e.expose) return res.status(e.status).json({ error: e.message }); throw e; }
   }
   let id; const pushQ = [];
@@ -304,6 +335,7 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
         await db.run('UPDATE posts SET image=$1 WHERE id=$2', [url, id], c);
       }
       if (vid) await video.insert(db, c, id, vid, isReel);
+      if (poll) await db.run('INSERT INTO polls(post_id,options,ends_at,created_at) VALUES ($1,$2,$3,$4)', [id, JSON.stringify(poll.opts), poll.ends, now()], c);
       if (parent) await notify(parent.user_id, req.user.id, 'reply', id, c, pushQ);
       for (const uid of await push.mentionedUsers(text, req.user.id)) if (!parent || uid !== parent.user_id) await notify(uid, req.user.id, 'mention', id, c, pushQ);
       return id;
@@ -353,6 +385,17 @@ app.delete('/api/posts/:id', auth, h(async (req, res) => {
   res.json({ ok: true });
 }));
 
+app.post('/api/posts/:id/vote', auth, h(async (req, res) => {
+  const id = postIdParam(req, res); if (!id) return;
+  const pl = await db.get('SELECT * FROM polls WHERE post_id=$1', [id]);
+  if (!pl) return res.status(404).json({ error: 'Poll not found' });
+  const opt = Number(req.body && req.body.option);
+  if (!Number.isInteger(opt) || opt < 0 || opt >= pl.options.length) return res.status(400).json({ error: 'Pick one of the options' });
+  if (Date.now() >= Number(pl.ends_at)) return res.status(409).json({ error: 'This poll has ended' });
+  const n = await db.run('INSERT INTO poll_votes(post_id,user_id,option_idx,created_at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING', [id, req.user.id, opt, now()]);
+  if (!n) return res.status(409).json({ error: 'You already voted', post: await getPost(id, req.user.id) });
+  res.json({ post: await getPost(id, req.user.id) });
+}));
 app.post('/api/posts/:id/like', auth, h(async (req, res) => {
   const id = postIdParam(req, res); if (!id) return;
   const p = await db.get('SELECT * FROM posts WHERE id=$1', [id]);

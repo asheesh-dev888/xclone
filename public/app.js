@@ -38,6 +38,8 @@ const P = {
   chart: 'M8.75 21V3h2v18h-2zM18 21V8.5h2V21h-2zM4 21l.004-10h2L6 21H4zm9.248 0v-7h2v7h-2z',
   check: 'M9 20c-.264 0-.52-.104-.707-.293l-4.785-4.785 1.414-1.414L9 17.586 19.072 7.5l1.414 1.414L9.707 19.707A1 1 0 0 1 9 20z',
   video: 'M3 6.5C3 5.12 4.12 4 5.5 4h9C15.88 4 17 5.12 17 6.5v1.38l3.55-2.13A1 1 0 0 1 22 6.6v10.8a1 1 0 0 1-1.45.85L17 16.12v1.38c0 1.38-1.12 2.5-2.5 2.5h-9C4.12 20 3 18.88 3 17.5v-11zM5.5 6c-.28 0-.5.22-.5.5v11c0 .28.22.5.5.5h9c.28 0 .5-.22.5-.5v-11c0-.28-.22-.5-.5-.5h-9zM17 10.2v3.6l3 1.8V8.4l-3 1.8z',
+  mic: 'M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z',
+  poll: 'M4 4h2v16H4zm5 6h2v10H9zm5-4h2v14h-2zm5 8h2v6h-2z',
   record: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z',
   reels: 'M5.5 3h13C19.88 3 21 4.12 21 5.5v13c0 1.38-1.12 2.5-2.5 2.5h-13C4.12 21 3 19.88 3 18.5v-13C3 4.12 4.12 3 5.5 3zM5 9v9.5c0 .28.22.5.5.5h13c.28 0 .5-.22.5-.5V9H5zm0-2h2.6l2-2H5.5c-.28 0-.5.22-.5.5V7zm5.4 0h3.2l2-2h-3.2l-2 2zm6 0H19V5.5c0-.28-.22-.5-.5-.5h-.1l-2 2zM10 10.8l5.2 3.2-5.2 3.2v-6.4z',
   reelsFill: 'M5.5 3h1.9l-4 4H3V5.5C3 4.12 4.12 3 5.5 3zm4.7 0h3.2l-4 4H6.2l4-4zm6 0h2.3C19.88 3 21 4.12 21 5.5V7h-8.8l4-4zM3 9h18v9.5c0 1.38-1.12 2.5-2.5 2.5h-13C4.12 21 3 19.88 3 18.5V9zm7 1.8v6.4l5.2-3.2-5.2-3.2z',
@@ -159,7 +161,7 @@ function go(url, replace) {
 }
 async function render() {
   closeMenus(); closeAi(); reelsTeardown();
-  $$('#app form[data-form="compose"]').forEach(f => clearComposerVideo(f)); // leaving the page drops an unposted upload
+  $$('#app form[data-form="compose"]').forEach(f => { clearComposerVideo(f); clearVoice(f); }); // leaving the page drops an unposted upload
   const p = location.pathname;
   if (!state.me && !PUBLIC.includes(p)) return go('/login', true);
   if (state.me && PUBLIC.includes(p)) return go('/home', true);
@@ -263,6 +265,8 @@ function postHTML(p, { thread = false } = {}) {
       ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
       ${p.image ? `<div class="media"><img src="${esc(p.image)}" loading="lazy" alt=""></div>` : ''}
       ${p.video ? videoHTML(p) : ''}
+      ${p.audio ? audioHTML(p) : ''}
+      ${p.poll ? pollHTML(p) : ''}
       ${actionsHTML(p)}
     </div>
   </article>`;
@@ -302,10 +306,18 @@ function composerHTML({ id, placeholder = 'What is happening?!', parentId = '', 
       <textarea name="text" rows="1" placeholder="${esc(placeholder)}" ${autofocus ? 'autofocus' : ''}></textarea>
       <div class="preview" hidden><img alt=""><button type="button" class="x" data-action="clear-image" aria-label="Remove image">${ic('close', 'icon')}</button></div>
       ${state.config.video ? videoPreviewHTML(!parentId) : ''}
+      <div class="voice-box" hidden data-state=""><button type="button" class="vb-stop" data-action="voice-stop" aria-label="Stop recording"><span></span></button><span class="vb-dot"></span><span class="vb-time">0:00</span><audio controls preload="metadata" hidden></audio><span class="vb-status"></span><button type="button" class="x" data-action="voice-clear" aria-label="Remove voice note">${ic('close', 'icon')}</button></div>
+      ${parentId ? '' : `<div class="poll-edit" hidden>
+        <div class="pe-opts">${[1, 2].map(i => `<input class="pe-opt" maxlength="25" placeholder="Choice ${i}" autocomplete="off">`).join('')}</div>
+        <button type="button" class="pe-add" data-action="poll-add">+ Add a choice</button>
+        <div class="pe-row"><label>Poll length <select class="pe-len">${[[60, '1 hour'], [360, '6 hours'], [720, '12 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days']].map(([m, l]) => `<option value="${m}"${m === 1440 ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+        <button type="button" class="pe-remove" data-action="poll-toggle">Remove poll</button></div></div>`}
       <div class="tools">
         <div class="tool-row"><label class="tool" title="Add photo">${ic('image')}<input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label>
         ${state.config.video ? `<label class="tool tool-video" title="Add video" aria-label="Add video">${ic('video')}<input type="file" name="video" accept="video/*,.mkv,.3gp,.mov" hidden></label>
-        <label class="tool tool-record" title="Record a video" aria-label="Record a video">${ic('record')}<input type="file" name="video_capture" accept="video/*" capture="environment" hidden></label>` : ''}</div>
+        <label class="tool tool-record" title="Record a video" aria-label="Record a video">${ic('record')}<input type="file" name="video_capture" accept="video/*" capture="environment" hidden></label>` : ''}
+        ${state.config.video && window.MediaRecorder ? `<button type="button" class="tool tool-voice" data-action="voice-rec" title="Record a voice note (up to 30 s)" aria-label="Record a voice note">${ic('mic')}</button>` : ''}
+        ${parentId ? '' : `<button type="button" class="tool tool-poll" data-action="poll-toggle" title="Poll" aria-label="Add a poll">${ic('poll')}</button>`}</div>
         <div class="right"><span class="counter"></span><button class="btn btn-primary" type="submit" disabled>${buttonLabel}</button></div>
       </div>
     </div>
@@ -326,7 +338,10 @@ function updateComposer(form) {
   const left = MAX - len;
   cnt.className = 'counter' + (left < 0 ? ' over' : left <= 20 ? ' warn' : '');
   cnt.innerHTML = len ? `${left <= 20 ? `<span>${left}</span>` : ''}${ring(len)}` : '';
-  $('button[type=submit]', form).disabled = (!ta.value.trim() && !hasImg && !vidReady) || len > MAX || vidBusy;
+  const vo = composerVoice.get(form), voReady = !!(vo && vo.result), voBusy = !!(vo && !vo.result);
+  const pe = $('.poll-edit', form), pollOn = pe && !pe.hidden;
+  const pollOk = !pollOn || ($$('.pe-opt', pe).filter(i => i.value.trim()).length >= 2 && !!ta.value.trim());
+  $('button[type=submit]', form).disabled = (!ta.value.trim() && !hasImg && !vidReady && !voReady) || len > MAX || vidBusy || voBusy || !pollOk;
 }
 document.addEventListener('input', (e) => { const f = e.target.closest('form[data-form="compose"]'); if (f) updateComposer(f); });
 document.addEventListener('change', (e) => {
@@ -375,10 +390,14 @@ document.addEventListener('submit', async (e) => {
       fd.append('video', JSON.stringify({ public_id: r.public_id, version: r.version, duration: r.duration || vs.meta.duration, width: r.width, height: r.height, bytes: r.bytes, cloud_name: vs.cloudName }));
       if (!f.dataset.parent && f.is_reel && f.is_reel.checked) fd.append('is_reel', '1');
     }
+    const vo = composerVoice.get(f);
+    if (vo && vo.result) fd.append('voice', JSON.stringify({ public_id: vo.result.public_id, version: vo.result.version, duration: vo.result.duration || vo.seconds, bytes: vo.result.bytes, cloud_name: vo.cloudName }));
+    const pe = $('.poll-edit', f);
+    if (pe && !pe.hidden) { fd.append('poll_options', JSON.stringify($$('.pe-opt', pe).map(i => i.value.trim()).filter(Boolean))); fd.append('poll_minutes', $('.pe-len', pe).value); }
     try {
       const { post } = await api('POST', '/api/posts', fd);
       remember([post]);
-      f.reset(); $('.preview', f).hidden = true; clearComposerVideo(f, { posted: true }); updateComposer(f);
+      f.reset(); $('.preview', f).hidden = true; clearComposerVideo(f, { posted: true }); clearVoice(f, { posted: true }); pollReset(f); updateComposer(f);
       const inModal = f.closest('.modal');
       if (inModal) closeModal();
       toast(f.dataset.parent ? 'Your reply was sent.' : post.video && post.video.is_reel ? 'Your reel was posted.' : 'Your post was sent.');
@@ -517,7 +536,7 @@ document.addEventListener('click', async (e) => {
 
 // ---------- modals ----------
 function openModal(html) { $('#modal-root').innerHTML = `<div class="modal-bg" data-bg>${html}</div>`; document.body.style.overflow = 'hidden'; }
-function closeModal() { $$('#modal-root form[data-form="compose"]').forEach(f => clearComposerVideo(f)); $('#modal-root').innerHTML = ''; document.body.style.overflow = ''; }
+function closeModal() { $$('#modal-root form[data-form="compose"]').forEach(f => { clearComposerVideo(f); clearVoice(f); }); $('#modal-root').innerHTML = ''; document.body.style.overflow = ''; }
 document.addEventListener('mousedown', (e) => { if (e.target.matches('[data-bg]')) closeModal(); });
 function openCompose(parent) {
   openModal(`<div class="modal"><div class="modal-head"><button class="back" data-action="close-modal" aria-label="Close">${ic('close')}</button><h2></h2></div>
@@ -782,6 +801,8 @@ async function viewPost(id) {
         ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
         ${p.image ? `<div class="media"><img src="${esc(p.image)}" alt=""></div>` : ''}
         ${p.video ? videoHTML(p, { focus: true }) : ''}
+        ${p.audio ? audioHTML(p) : ''}
+        ${p.poll ? pollHTML(p) : ''}
         <div class="when">${fullDate(p.created_at)}</div>
         ${statsHTML(p)}
         ${actionsHTML(p)}
@@ -1799,9 +1820,9 @@ const momo = {
   x: 0, y: 0, rot: 0, W: 60, H: 72, placed: false,
   post: null, postId: 0, st: 'hidden', flight: null, raf: 0,
   scrolling: false, lastHop: 0, lastActivity: Date.now(), band: null,
-  thoughts: new Map(), loading: new Map(), shownAt: new Map(), bubbleKind: '', timers: {}, io: null, visible: new Set(), idleIv: 0,
+  thoughts: new Map(), moods: new Map(), loading: new Map(), shownAt: new Map(), bubbleKind: '', timers: {}, io: null, visible: new Set(), idleIv: 0,
 };
-try { const saved = JSON.parse(sessionStorage.getItem('zuzu.momoThoughts') || '[]'); saved.forEach(([k, v]) => momo.thoughts.set(k, v)); } catch {}
+try { const saved = JSON.parse(sessionStorage.getItem('zuzu.momoThoughts') || '[]'); saved.forEach(([k, v]) => momo.thoughts.set(k, v)); JSON.parse(sessionStorage.getItem('zuzu.momoMoods') || '[]').forEach(([k, v]) => momo.moods.set(k, v)); } catch {}
 const momoReduced = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 const momoToggleHTML = (mobile) => mobile
   ? `<button class="momo-mtoggle" data-action="momo-toggle" aria-pressed="${momoOn()}" aria-label="Show Momo 🐒" title="Show Momo 🐒">🐒</button>`
@@ -1817,6 +1838,7 @@ const MOMO_SVG = `<svg class="momo-svg" viewBox="0 0 100 120" aria-hidden="true"
   <g class="m-torso">
     <ellipse cx="50" cy="79" rx="21" ry="18.5" fill="#8b5a2b"/>
     <ellipse cx="50" cy="83" rx="13" ry="12.5" fill="#e9c49a"/>
+    <g class="m-outfit m-kurta"><path d="M30 76Q30 61 50 60.5Q70 61 70 76L68 95Q50 99 32 95Z" fill="#ff9933"/><path d="M45 61L50 72L55 61" fill="none" stroke="#fff3e0" stroke-width="2"/><path d="M50 72V92" stroke="#e07b10" stroke-width="1.4"/><circle cx="50" cy="77" r="1.3" fill="#fff3e0"/><circle cx="50" cy="83" r="1.3" fill="#fff3e0"/><path d="M32 93Q50 97 68 93" stroke="#138808" stroke-width="2.2" fill="none"/></g>
     <g class="m-arm-l"><path d="M32 71Q25 84 34 93" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="35" cy="94" r="4.2" fill="#e9c49a"/></g>
     <g class="m-arm-r"><path d="M68 71Q75 84 66 93" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="65" cy="94" r="4.2" fill="#e9c49a"/></g>
   </g>
@@ -1831,10 +1853,19 @@ const MOMO_SVG = `<svg class="momo-svg" viewBox="0 0 100 120" aria-hidden="true"
     <circle cx="36.5" cy="47" r="3.6" fill="#ff8fa3" opacity=".5"/><circle cx="63.5" cy="47" r="3.6" fill="#ff8fa3" opacity=".5"/>
     <ellipse cx="48" cy="46" rx="1.1" ry="1.4" fill="#5a3415"/><ellipse cx="52" cy="46" rx="1.1" ry="1.4" fill="#5a3415"/>
     <path class="m-mouth" d="M44 50.5Q50 55.8 56 50.5" stroke="#5a3415" stroke-width="1.9" fill="none" stroke-linecap="round"/>
+    <path class="m-laugh" d="M43 50Q50 59 57 50Z" fill="#5a3415"/>
+    <path class="m-brows" d="M37.5 31.5L46.5 34.5M62.5 31.5L53.5 34.5" stroke="#2b1a0e" stroke-width="2.2" stroke-linecap="round"/>
+    <ellipse class="m-tear" cx="59.5" cy="45" rx="1.9" ry="2.7" fill="#7cc7ff"/>
+    <g class="m-outfit m-shades"><rect x="35.5" y="33" width="13" height="10" rx="4" fill="#111"/><rect x="51.5" y="33" width="13" height="10" rx="4" fill="#111"/><path d="M48.5 36.5h3M35.5 36L27 35M64.5 36L73 35" stroke="#111" stroke-width="1.8"/><path d="M38 35.5l4 0" stroke="#fff" stroke-width="1.2" opacity=".6" stroke-linecap="round"/></g>
+    <g class="m-outfit m-cap"><path d="M26.5 30Q27 11 50 11Q73 11 73.5 30Q50 24 26.5 30Z" fill="#1d9bf0"/><path d="M50 26.5Q66 24 82 29Q80 33 70 31.5Q60 29.5 50 30Z" fill="#0f6fb3"/><circle cx="50" cy="11.5" r="2.4" fill="#0f6fb3"/></g>
+    <g class="m-outfit m-crown"><path d="M33 20L35 5L43 13L50 2L57 13L65 5L67 20Z" fill="#ffd400" stroke="#d4a500" stroke-width="1.2" stroke-linejoin="round"/><circle cx="50" cy="13" r="2.2" fill="#f91880"/><circle cx="40" cy="16" r="1.5" fill="#1d9bf0"/><circle cx="60" cy="16" r="1.5" fill="#00ba7c"/></g>
   </g>
   <g class="m-arm-think"><path d="M68 73Q80 62 61 57.5" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="58.5" cy="57.5" r="4.6" fill="#e9c49a"/></g>
 </svg>`;
 
+const MOMO_MOODS = ['happy', 'sad', 'funny', 'angry', 'thoughtful'];
+// Outfit unlocked by milestones (Settings → Momo's outfit); shown on the web Momo via #momo[data-outfit].
+function momoOutfit(key) { if (momo.el) { if (key) momo.el.dataset.outfit = key; else delete momo.el.dataset.outfit; } }
 function momoBuild() {
   if (momo.built) return;
   momo.built = true;
@@ -1843,6 +1874,7 @@ function momoBuild() {
   el.innerHTML = `<div class="momo-bubble" hidden><div class="mb-cloud" data-momo="bubble"><i class="pf p1"></i><i class="pf p2"></i><i class="pf p3"></i><i class="pf p4"></i><i class="pf p5"></i><span class="mb-ic" aria-hidden="true">💬</span><span class="mb-text" aria-live="polite"></span></div><i class="mb-dot d1"></i><i class="mb-dot d2"></i><i class="mb-dot d3"></i></div>
     <div class="momo-fig" data-momo="monkey" role="button" tabindex="0" aria-label="Momo the monkey. Tap for a thought">${MOMO_SVG}</div>`;
   document.body.appendChild(el);
+  momoOutfit(state.prefs && state.prefs.momo_outfit);
   momo.bubble = $('.momo-bubble', el); momo.textEl = $('.mb-text', el);
   el.addEventListener('click', (e) => {
     const t = e.target.closest('[data-momo]'); if (!t) return;
@@ -2002,10 +2034,11 @@ async function momoThought(id) {
       try {
         const r = await fetch('/api/monkey/thought/' + id, { credentials: 'same-origin' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        const { thought } = await r.json();
+        const { thought, mood } = await r.json();
         if (typeof thought !== 'string' || !thought) throw new Error('empty');
+        if (MOMO_MOODS.includes(mood)) momo.moods.set(id, mood);
         momo.thoughts.set(id, thought);
-        try { sessionStorage.setItem('zuzu.momoThoughts', JSON.stringify([...momo.thoughts].slice(-200))); } catch {}
+        try { sessionStorage.setItem('zuzu.momoThoughts', JSON.stringify([...momo.thoughts].slice(-200))); sessionStorage.setItem('zuzu.momoMoods', JSON.stringify([...momo.moods].slice(-200))); } catch {}
         return thought;
       } catch { return MOMO_LOCAL[id % MOMO_LOCAL.length]; } finally { momo.loading.delete(id); }
     })());
@@ -2022,6 +2055,8 @@ async function momoThink(id) {
     if (!momo.active || momo.postId !== id || momo.flight || momo.st === 'sleep') return;
     momo.shownAt.set(id, Date.now());
     momoShowBubble(text, 'thought');
+    const mood = momo.moods.get(id);
+    if (mood) { momo.el.dataset.mood = mood; window.__momoMoods && window.__momoMoods.push(mood); }
   }, wait);
 }
 function momoShowBubble(text, kind) {
@@ -2043,7 +2078,7 @@ function momoShowBubble(text, kind) {
 function momoHideBubble(now) {
   const b = momo.bubble; if (!b || b.hidden) return;
   clearTimeout(momo.timers.bubble); clearTimeout(momo.timers.bubbleOut);
-  const done = () => { b.hidden = true; b.classList.remove('out'); momo.bubbleKind = ''; if (momo.st === 'think') momoSetState('sit'); };
+  const done = () => { b.hidden = true; b.classList.remove('out'); momo.bubbleKind = ''; delete momo.el.dataset.mood; if (momo.st === 'think') momoSetState('sit'); };
   if (now) return done();
   b.classList.add('out');
   momo.timers.bubbleOut = setTimeout(done, 400);
@@ -2188,6 +2223,139 @@ setInterval(async () => {
 
 // ---------- Settings (/settings): account deletion; reports (posts, profiles, DM messages); admin report queue ----------
 routes.push([/^\/settings\/?$/, () => viewSettings()]);
+// ---------- Polls (2–4 choices, 1 hour – 7 days, one vote each; results after voting or when it ends) ----------
+function pollLeft(ms) {
+  const m = Math.max(0, Math.round((ms - Date.now()) / 60000));
+  return m >= 1440 ? `${Math.floor(m / 1440)}d left` : m >= 60 ? `${Math.floor(m / 60)}h left` : `${Math.max(m, 1)}m left`;
+}
+function pollHTML(p) {
+  const pl = p.poll, show = !!pl.votes, total = pl.total || 0;
+  const max = show ? Math.max(...pl.votes) : 0;
+  const opts = pl.options.map((o, i) => {
+    if (!show) return `<button class="poll-opt" data-action="poll-vote" data-id="${p.id}" data-opt="${i}">${esc(o)}</button>`;
+    const pct = total ? Math.round(pl.votes[i] / total * 100) : 0;
+    return `<div class="poll-res${pl.votes[i] === max && total ? ' win' : ''}${pl.my_vote === i ? ' mine' : ''}"><span class="pr-bar" style="width:${pct}%"></span><span class="pr-l">${esc(o)}${pl.my_vote === i ? ' ✓' : ''}</span><span class="pr-p">${pct}%</span></div>`;
+  }).join('');
+  return `<div class="poll" data-poll="${p.id}">${opts}<div class="poll-meta">${total} vote${total === 1 ? '' : 's'} · ${pl.ended ? 'Final results' : pollLeft(pl.ends_at)}</div></div>`;
+}
+document.addEventListener('click', async (e) => {
+  const v = e.target.closest('[data-action="poll-vote"]');
+  if (v) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    $$(`[data-poll="${v.dataset.id}"] .poll-opt`).forEach(b => b.disabled = true);
+    try { const { post } = await api('POST', `/api/posts/${v.dataset.id}/vote`, { option: +v.dataset.opt }); pollRefresh(post); }
+    catch (err) { toast(err.message); const r = await api('GET', `/api/posts/${v.dataset.id}`).catch(() => null); if (r && r.post) pollRefresh(r.post); }
+    return;
+  }
+  const t = e.target.closest('[data-action="poll-toggle"],[data-action="poll-add"],[data-action="voice-rec"],[data-action="voice-stop"],[data-action="voice-clear"]');
+  if (!t) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  const f = t.closest('form[data-form="compose"]'); if (!f) return;
+  const a = t.dataset.action;
+  if (a === 'poll-toggle') {
+    const pe = $('.poll-edit', f); if (!pe) return;
+    if (pe.hidden && (f.image.files.length || composerVideo.get(f) || composerVoice.get(f))) return toast('A poll can’t have media');
+    if (pe.hidden) { pe.hidden = false; $('.pe-opt', pe).focus(); } else pollReset(f);
+  } else if (a === 'poll-add') {
+    const box = $('.pe-opts', f), n = $$('.pe-opt', box).length;
+    if (n < 4) box.insertAdjacentHTML('beforeend', `<input class="pe-opt" maxlength="25" placeholder="Choice ${n + 1}" autocomplete="off">`);
+    if (n + 1 >= 4) t.hidden = true;
+  } else if (a === 'voice-rec') startVoice(f);
+  else if (a === 'voice-stop') { const vo = composerVoice.get(f); if (vo && vo.rec && vo.rec.state === 'recording') vo.rec.stop(); }
+  else if (a === 'voice-clear') clearVoice(f);
+  updateComposer(f);
+}, true);
+function pollRefresh(post) {
+  if (!post) return;
+  postCache.set(post.id, { ...(postCache.get(post.id) || {}), ...post });
+  $$(`[data-poll="${post.id}"]`).forEach(el => { el.outerHTML = pollHTML(post); });
+}
+function pollReset(f) {
+  const pe = $('.poll-edit', f); if (!pe) return;
+  pe.hidden = true;
+  $('.pe-opts', pe).innerHTML = [1, 2].map(i => `<input class="pe-opt" maxlength="25" placeholder="Choice ${i}" autocomplete="off">`).join('');
+  $('.pe-add', pe).hidden = false; $('.pe-len', pe).value = '1440';
+}
+
+// ---------- Voice posts: record up to 30 s in the browser, upload through the signed Cloudinary path ----------
+const VOICE_MAX_S = 30;
+const composerVoice = new WeakMap(); // form -> { rec, stream, chunks, timer, seconds, result, cloudName, ctl, url }
+function audioHTML(p) {
+  return `<div class="voice" data-voice="${p.id}"><button class="vo-play" data-action="voice-play" aria-label="Play voice note">${ic('mic')}</button><audio preload="none" src="${esc(p.audio.src)}"></audio><div class="vo-track"><div class="vo-bar"></div></div><span class="vo-time">${fmtDur(p.audio.duration)}</span></div>`;
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-action="voice-play"]'); if (!b) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  const box = b.closest('.voice'), au = $('audio', box);
+  $$('.voice audio').forEach(x => { if (x !== au && !x.paused) x.pause(); });
+  if (au.paused) au.play().catch(err => toast('Couldn’t play this voice note')); else au.pause();
+}, true);
+document.addEventListener('timeupdate', (e) => {
+  const au = e.target; if (!au.closest || !au.closest('.voice')) return;
+  const box = au.closest('.voice'), d = au.duration || 0;
+  $('.vo-bar', box).style.width = (d ? au.currentTime / d * 100 : 0) + '%';
+  $('.vo-time', box).textContent = fmtDur(au.paused && !au.currentTime ? d : au.currentTime);
+}, true);
+['play', 'pause', 'ended'].forEach(ev => document.addEventListener(ev, (e) => { const box = e.target.closest && e.target.closest('.voice'); if (box) box.classList.toggle('playing', !e.target.paused && !e.target.ended); }, true));
+async function startVoice(f) {
+  if (composerVoice.get(f)) return;
+  if ($('.poll-edit', f) && !$('.poll-edit', f).hidden) return toast('A poll can’t have media');
+  if (f.image.files.length || composerVideo.get(f)) return toast('A post can have one photo, video or voice note');
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return toast('Allow microphone access to record a voice note'); }
+  const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  const vo = { rec, stream, chunks: [], seconds: 0, ctl: { aborted: false }, started: Date.now() };
+  composerVoice.set(f, vo);
+  const box = $('.voice-box', f); box.hidden = false; box.dataset.state = 'recording';
+  $('audio', box).hidden = true; $('.vb-status', box).textContent = 'Recording…';
+  rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) vo.chunks.push(ev.data); };
+  vo.timer = setInterval(() => {
+    vo.seconds = (Date.now() - vo.started) / 1000;
+    $('.vb-time', box).textContent = fmtDur(vo.seconds) + ' / 0:30';
+    if (vo.seconds >= VOICE_MAX_S && rec.state === 'recording') rec.stop();
+  }, 200);
+  rec.onstop = async () => {
+    clearInterval(vo.timer); stream.getTracks().forEach(t => t.stop());
+    if (composerVoice.get(f) !== vo || vo.ctl.aborted) return;
+    vo.seconds = Math.min(VOICE_MAX_S, (Date.now() - vo.started) / 1000);
+    const type = (rec.mimeType || mime || 'audio/webm').split(';')[0];
+    const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+    const file = new File(vo.chunks, 'voice.' + ext, { type });
+    if (vo.seconds < 0.8 || !file.size) { toast('That recording was too short'); return clearVoice(f); }
+    vo.url = URL.createObjectURL(file);
+    const au = $('audio', box); au.src = vo.url; au.hidden = false;
+    box.dataset.state = 'uploading'; $('.vb-time', box).textContent = fmtDur(vo.seconds); $('.vb-status', box).textContent = 'Uploading…';
+    updateComposer(f);
+    try {
+      const sig = await api('POST', '/api/video/sign', { kind: 'voice' });
+      if (composerVoice.get(f) !== vo) return;
+      vo.cloudName = sig.cloudName;
+      const res = await uploadVideo(file, sig, (l, t) => { $('.vb-status', box).textContent = `Uploading… ${t ? Math.round(l / t * 100) : 0}%`; }, vo.ctl);
+      if (composerVoice.get(f) !== vo) return;
+      vo.result = res; box.dataset.state = 'done'; $('.vb-status', box).textContent = 'Ready';
+    } catch (err) { if (composerVoice.get(f) === vo && !vo.ctl.aborted) { toast(err.message || 'Upload failed'); clearVoice(f); } }
+    updateComposer(f);
+  };
+  rec.start(250);
+  updateComposer(f);
+}
+function clearVoice(f, { posted = false } = {}) {
+  if (!f) return;
+  const vo = composerVoice.get(f); composerVoice.delete(f);
+  if (vo) {
+    vo.ctl.aborted = true; clearInterval(vo.timer);
+    if (vo.rec && vo.rec.state === 'recording') try { vo.rec.stop(); } catch {}
+    if (vo.stream) vo.stream.getTracks().forEach(t => t.stop());
+    if (vo.ctl.xhr) try { vo.ctl.xhr.abort(); } catch {}
+    if (vo.url) URL.revokeObjectURL(vo.url);
+    if (vo.result && !posted) api('POST', '/api/video/discard', { public_id: vo.result.public_id }).catch(() => {});
+  }
+  const box = $('.voice-box', f); if (!box) return;
+  box.hidden = true; box.dataset.state = ''; const au = $('audio', box); au.removeAttribute('src'); au.hidden = true;
+  $('.vb-time', box).textContent = '0:00';
+}
+
 function viewSettings() {
   const u = state.me;
   shell(`<div class="header"><div class="header-row"><button class="back" data-action="back" aria-label="Back">${ic('back')}</button><h1>Settings</h1></div></div>
@@ -2197,6 +2365,7 @@ function viewSettings() {
       <section class="set-sec" id="set-lang"><h2>Language</h2>
         <div class="field"><label for="set-ui-lang">App language</label><select id="set-ui-lang" data-pref="ui_lang">${[['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ui_lang || ZUZU_I18N.get()) === k ? ' selected' : ''} data-noi18n>${l}</option>`).join('')}</select></div>
         <div class="field"><label for="set-ai-lang">AI language</label><p class="muted small">ZuZu AI answers and Momo’s thoughts</p><select id="set-ai-lang" data-pref="ai_lang">${[['auto', 'Same as the post'], ['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ai_lang || 'auto') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div></section>
+      <section class="set-sec" id="set-outfit"><h2>Momo’s outfit</h2><p class="muted">Unlock outfits for Momo 🐒 by reaching milestones.</p><div class="outfits" id="outfits">${loader()}</div></section>
       <section class="set-sec" id="set-push"><h2>Push notifications</h2><p class="muted" id="push-status">Get notified about likes, replies, follows, mentions and messages.</p>
         <button class="btn btn-outline" data-action="push-toggle" id="push-btn" hidden></button></section>
       <section class="set-sec danger-zone" id="set-delete"><h2>Delete account</h2>
@@ -2205,8 +2374,29 @@ function viewSettings() {
           <input id="del-confirm" name="confirm" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${esc(u.username)}"></div>
           <button class="btn btn-danger" type="submit" disabled>Delete my account</button></form></section>
     </div>`, { active: '' });
-  pushStatus();
+  pushStatus(); loadOutfits();
 }
+async function loadOutfits() {
+  const el = $('#outfits'); if (!el) return;
+  try {
+    const r = await api('GET', '/api/momo/outfits');
+    const card = (key, label, o) => `<button class="outfit-card${r.selected === key ? ' on' : ''}${o && !o.unlocked ? ' locked' : ''}" data-action="outfit" data-outfit-key="${key || ''}" ${o && !o.unlocked ? 'aria-disabled="true"' : ''} aria-pressed="${r.selected === key}">
+      <span class="oc-fig" data-outfit="${key || ''}">${MOMO_SVG}</span><b>${esc(label)}</b>
+      <small>${o ? (o.unlocked ? 'Unlocked' : `🔒 ${esc(o.how)} (${o.progress[0]}/${o.progress[1]})`) : 'Just Momo'}</small></button>`;
+    el.innerHTML = card(null, 'None') + r.outfits.map(o => card(o.key, o.label, o)).join('');
+  } catch (err) { el.innerHTML = `<p class="muted">${esc(err.message)}</p>`; }
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-action="outfit"]'); if (!b) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (b.classList.contains('locked')) return toast('Still locked: ' + $('small', b).textContent.replace('🔒 ', ''));
+  try {
+    const { selected } = await api('PUT', '/api/momo/outfit', { outfit: b.dataset.outfitKey || null });
+    state.prefs = { ...(state.prefs || {}), momo_outfit: selected }; momoOutfit(selected);
+    $$('.outfit-card').forEach(c => { const on = (c.dataset.outfitKey || null) === selected; c.classList.toggle('on', on); c.setAttribute('aria-pressed', on); });
+    toast(selected ? 'Momo is wearing the ' + selected + ' 🐒' : 'Momo’s outfit removed');
+  } catch (err) { toast(err.message); }
+}, true);
 // ---- Language preferences (saved on the account; the UI language also in localStorage) ----
 document.addEventListener('change', async (e) => {
   const sel = e.target.closest('select[data-pref]'); if (!sel) return;
@@ -2214,7 +2404,7 @@ document.addEventListener('change', async (e) => {
   try {
     state.prefs = await api('PUT', '/api/me/prefs', { [key]: sel.value });
     if (key === 'ui_lang') ZUZU_I18N.set(sel.value);
-    if (key === 'ai_lang') { momo.thoughts.clear(); try { sessionStorage.removeItem('zuzu.momoThoughts'); } catch {} }
+    if (key === 'ai_lang') { momo.thoughts.clear(); momo.moods.clear(); try { sessionStorage.removeItem('zuzu.momoThoughts'); sessionStorage.removeItem('zuzu.momoMoods'); } catch {} }
     toast(ZUZU_I18N.t('Saved'));
   } catch (err) { toast(err.message); }
 });

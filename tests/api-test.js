@@ -15,6 +15,7 @@ function client() {
   return c;
 }
 (async () => {
+  if (process.env.API_ONLY === 'batchc') { await batchCTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'push') { await pushTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'safety') { await safetyTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'video') { await videoTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); } // quick run of one section
@@ -81,6 +82,7 @@ function client() {
   await videoTests();
   await safetyTests();
   await pushTests();
+  await batchCTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
 
@@ -1271,4 +1273,116 @@ async function pushTests() {
     await a('DELETE', '/api/me', { confirm: ua }); await b('DELETE', '/api/me', { confirm: ub });
     if (fail && process.env.API_ONLY === 'push') console.log(app.log().slice(-1500));
   } finally { app.child.kill(); off.child.kill(); mock.srv.close(); ps.close(); }
+}
+
+async function batchCTests() {
+  console.log('\n  Momo moods + outfits, polls, voice posts');
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) { console.log('  (skipping: needs a local server)'); return; }
+  const fs = require('fs');
+  const { startApp, startMockGroq } = require('./ai-server');
+  const { startMockCloudinary, makeAudio, makeVideo } = require('./cloudinary-server');
+  const { localDbUrl } = require('./google-server');
+  const groq = await startMockGroq({ chunkDelay: 1 });
+  const cld = await startMockCloudinary();
+  const app = await startApp({ port: 4223, ai: { baseUrl: groq.url }, env: { ...cld.env } });
+  const { Client } = require('pg'); const pg = new Client({ connectionString: localDbUrl() }); await pg.connect();
+  const mk = () => { let cookie = ''; return async (method, p, body) => {
+    const hd = {}; if (cookie) hd.cookie = cookie; let b;
+    if (body instanceof FormData) b = body; else if (body) { hd['content-type'] = 'application/json'; b = JSON.stringify(body); }
+    const res = await fetch(app.url + p, { method, headers: hd, body: b });
+    const sc = res.headers.get('set-cookie'); if (sc && /sid=/.test(sc)) cookie = sc.split(';')[0];
+    let data = {}; try { data = await res.json(); } catch {} return { status: res.status, data };
+  }; };
+  const form = (o) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.append(k, typeof v === 'string' ? v : JSON.stringify(v)); return f; };
+  const upload = async (s, file, type) => {
+    const f = new FormData(); for (const [k, v] of Object.entries(s.params)) f.append(k, String(v));
+    f.append('file', new Blob([fs.readFileSync(file)], { type }), require('path').basename(file));
+    const r = await fetch(s.uploadUrl, { method: 'POST', body: f }); return { status: r.status, data: await r.json() };
+  };
+  const rnd = Math.floor(Math.random() * 1e6), ua = 'bc_a' + rnd, ub = 'bc_b' + rnd, uc = 'bc_c' + rnd;
+  const a = mk(), b = mk(), c = mk();
+  try {
+    await a('POST', '/api/signup', { username: ua, password: 'secret123', name: 'C A' });
+    await b('POST', '/api/signup', { username: ub, password: 'secret123', name: 'C B' });
+    await c('POST', '/api/signup', { username: uc, password: 'secret123', name: 'C C' });
+    // ---- moods ----
+    let p1 = (await a('POST', '/api/posts', form({ text: 'Great news today MOCK_MOOD_funny' }))).data.post;
+    groq.calls.length = 0;
+    let t = (await b('GET', `/api/monkey/thought/${p1.id}`)).data;
+    ok(t.source === 'ai' && t.mood === 'funny' && t.thought === 'A mood-tagged thought', 'mood parsed from the same Groq call ("funny|thought"), tag stripped from the thought', JSON.stringify(t));
+    ok(groq.calls.length === 1 && /happy, sad, funny, angry, thoughtful/.test(groq.calls[0].body.messages[0].content), 'one Groq call asks for thought + mood together');
+    t = (await c('GET', `/api/monkey/thought/${p1.id}`)).data; ok(t.source === 'cache' && t.mood === 'funny' && groq.calls.length === 1, 'mood cached with the thought');
+    const p2 = (await a('POST', '/api/posts', form({ text: 'I really miss my grandma today' }))).data.post;
+    t = (await b('GET', `/api/monkey/thought/${p2.id}`)).data;
+    ok(['happy', 'sad', 'funny', 'angry', 'thoughtful'].includes(t.mood), 'untagged model output still gets a mood (keyword guess)', JSON.stringify(t));
+    const m = require('../monkey');
+    ok(m.guessMood('I miss you 😢') === 'sad' && m.guessMood('this is the worst, so angry') === 'angry' && m.guessMood('lol 😂') === 'funny' && m.guessMood('Why do we dream?') === 'thoughtful' && m.guessMood('Sunny day!') === 'happy', 'fallback mood guesses');
+    // ---- outfits ----
+    let o = (await c('GET', '/api/momo/outfits')).data;
+    ok(o.outfits.map(x => x.key).join() === 'cap,sunglasses,kurta,crown' && o.outfits.every(x => !x.unlocked) && o.selected === null, 'new user: 4 outfits, all locked');
+    ok((await c('PUT', '/api/momo/outfit', { outfit: 'cap' })).status === 403, 'locked outfit can’t be worn');
+    ok((await c('PUT', '/api/momo/outfit', { outfit: 'tophat' })).status === 400, 'unknown outfit rejected');
+    o = (await a('GET', '/api/momo/outfits')).data;
+    ok(o.outfits.find(x => x.key === 'cap').unlocked && !o.outfits.find(x => x.key === 'sunglasses').unlocked, 'first post unlocks the cap');
+    ok((await a('PUT', '/api/momo/outfit', { outfit: 'cap' })).data.selected === 'cap' && (await a('GET', '/api/me')).data.prefs.momo_outfit === 'cap', 'wear the cap (saved, in /api/me prefs)');
+    const { rows: [ua_] } = await pg.query('SELECT id FROM users WHERE username=$1', [ua]);
+    const likers = [];
+    for (let i = 0; i < 10; i++) { const r = await pg.query(`INSERT INTO users(username,name,password_hash,created_at) VALUES ($1,'liker','x',$2) RETURNING id`, [`bc_l${rnd}_${i}`, Date.now()]); likers.push(r.rows[0].id); await pg.query('INSERT INTO likes(user_id,post_id,created_at) VALUES ($1,$2,$3)', [r.rows[0].id, p1.id, Date.now()]); }
+    o = (await a('GET', '/api/momo/outfits')).data; ok(o.outfits.find(x => x.key === 'sunglasses').unlocked && o.stats.likes_received === 10, '10 likes received unlock the sunglasses');
+    for (let d = 1; d <= 7; d++) await pg.query('INSERT INTO posts(user_id,text,created_at) VALUES ($1,$2,$3)', [ua_.id, 'streak day ' + d, Date.parse('2026-03-0' + d + 'T06:00:00Z')]);
+    o = (await a('GET', '/api/momo/outfits')).data;
+    ok(o.stats.best_streak >= 7 && o.outfits.find(x => x.key === 'kurta').unlocked && o.outfits.find(x => x.key === 'crown').unlocked, '7-day IST streak unlocks the kurta, all three unlock the crown');
+    ok(m.bestStreak(['2026-01-01', '2026-01-02', '2026-01-04']) === 2, 'streak counts consecutive days only');
+    await pg.query('DELETE FROM users WHERE id = ANY($1::int[])', [likers]);
+    // ---- polls ----
+    const bad = async (o, msg) => ok((await a('POST', '/api/posts', form(o))).status === 400, msg);
+    await bad({ text: 'Q?', poll_options: ['only one'] }, 'poll needs 2+ options');
+    await bad({ text: 'Q?', poll_options: ['a', 'b', 'c', 'd', 'e'] }, 'poll max 4 options');
+    await bad({ text: 'Q?', poll_options: ['a', 'A'] }, 'duplicate options rejected');
+    await bad({ text: 'Q?', poll_options: ['a', 'x'.repeat(26)] }, 'option max 25 chars');
+    await bad({ text: 'Q?', poll_options: ['a', 'b'], poll_minutes: '30' }, 'min 1 hour');
+    await bad({ text: 'Q?', poll_options: ['a', 'b'], poll_minutes: String(8 * 1440) }, 'max 7 days');
+    await bad({ text: 'Q?', poll_options: ['a', 'b'], parent_id: String(p1.id) }, 'replies can’t have polls');
+    let r = await a('POST', '/api/posts', form({ text: 'Tea or coffee?', poll_options: ['Tea', 'Coffee', 'Both'], poll_minutes: '60' }));
+    const pp = r.data.post;
+    ok(pp.poll && pp.poll.options.length === 3 && pp.poll.votes === null && pp.poll.total === 0 && pp.poll.ends_at - Date.now() > 59 * 60e3 && pp.poll.ends_at - Date.now() <= 60 * 60e3, 'poll created; results hidden before voting');
+    r = await b('GET', `/api/posts/${pp.id}`); ok(r.data.post.poll.votes === null, 'others don’t see results before voting');
+    ok((await b('POST', `/api/posts/${pp.id}/vote`, { option: 7 })).status === 400, 'invalid option rejected');
+    r = await b('POST', `/api/posts/${pp.id}/vote`, { option: 1 });
+    ok(r.status === 200 && r.data.post.poll.my_vote === 1 && r.data.post.poll.votes.join() === '0,1,0' && r.data.post.poll.total === 1, 'vote → results shown with my vote');
+    ok((await b('POST', `/api/posts/${pp.id}/vote`, { option: 0 })).status === 409, 'one vote per user');
+    await c('POST', `/api/posts/${pp.id}/vote`, { option: 1 });
+    r = await a('GET', `/api/posts/${pp.id}`); ok(r.data.post.poll.votes === null && r.data.post.poll.total === 2, 'non-voter still sees only the total');
+    const items = (await a('GET', `/api/users/${ua}/posts`)).data.items || [];
+    ok(items.some(x => x.poll && x.id === pp.id), 'poll included in feeds');
+    await pg.query('UPDATE polls SET ends_at=$1 WHERE post_id=$2', [Date.now() - 1000, pp.id]);
+    r = await a('GET', `/api/posts/${pp.id}`); ok(r.data.post.poll.ended && r.data.post.poll.votes.join() === '0,2,0', 'ended poll shows final results to everyone');
+    ok((await a('POST', `/api/posts/${pp.id}/vote`, { option: 0 })).status === 409, 'can’t vote after the end');
+    // ---- voice posts ----
+    let sg = (await a('POST', '/api/video/sign', { kind: 'voice' })).data;
+    ok(sg.limits.maxSeconds === 30 && /webm/.test(sg.params.allowed_formats) && !sg.params.eager && /voice/.test(sg.params.tags), 'voice upload signature: audio formats, 30 s, no video transforms');
+    let up = await upload(sg, makeAudio({ seconds: 3 }), 'audio/webm');
+    ok(up.status === 200 && up.data.is_audio, 'voice note uploaded through the signed Cloudinary path', JSON.stringify(up.data).slice(0, 200));
+    r = await a('POST', '/api/posts', form({ text: 'listen', voice: { public_id: up.data.public_id, cloud_name: up.data.public_id && sg.cloudName } }));
+    ok(r.status === 200 && r.data.post.audio && r.data.post.audio.duration > 2 && /\.mp3$/.test(r.data.post.audio.src) && r.data.post.video === null, 'voice post: audio player source (mp3) + duration', JSON.stringify(r.data).slice(0, 300));
+    const vpost = r.data.post;
+    sg = (await a('POST', '/api/video/sign', { kind: 'voice' })).data;
+    up = await upload(sg, makeAudio({ seconds: 35 }), 'audio/webm');
+    r = await a('POST', '/api/posts', form({ text: 'too long', voice: { public_id: up.data.public_id } }));
+    ok(r.status === 400 && /30 seconds/.test(r.data.error), 'voice over 30 s rejected');
+    sg = (await a('POST', '/api/video/sign')).data;
+    up = await upload(sg, makeVideo({ seconds: 2 }), 'video/mp4');
+    r = await a('POST', '/api/posts', form({ text: 'not audio', voice: { public_id: up.data.public_id } }));
+    ok(r.status === 400, 'a video can’t be posted as a voice note');
+    r = await b('POST', '/api/posts', form({ text: 'stolen', voice: { public_id: vpost.audio.public_id } }));
+    ok(r.status === 403 || r.status === 409 || r.status === 400, 'someone else’s recording can’t be reposted as yours');
+    const reels = (await a('GET', '/api/reels')).data;
+    ok(!(reels.items || []).some(x => x.id === vpost.id), 'voice posts never show up in Reels');
+    await a('DELETE', `/api/posts/${vpost.id}`);
+    const q = await pg.query('SELECT 1 FROM video_deletions WHERE public_id=$1', [vpost.audio.public_id]);
+    ok(q.rowCount === 1 || cld.calls.destroy.some(d => d.public_id === vpost.audio.public_id), 'deleting a voice post queues the audio for Cloudinary cleanup');
+  } finally {
+    for (const [fn, u] of [[a, ua], [b, ub], [c, uc]]) await fn('DELETE', '/api/me', { confirm: u }).catch(() => {});
+    await pg.end(); app.child.kill(); groq.srv.close(); cld.close ? cld.close() : cld.srv && cld.srv.close();
+  }
 }

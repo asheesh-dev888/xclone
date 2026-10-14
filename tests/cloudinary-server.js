@@ -34,16 +34,28 @@ function makeVideo({ w = 360, h = 640, seconds = 2, ext = 'mp4', name } = {}) {
 function probe(file) {
   const out = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file]).toString());
   const vs = (out.streams || []).find(s => s.codec_type === 'video');
+  const as = (out.streams || []).find(s => s.codec_type === 'audio');
+  if (!vs && as) return { width: null, height: null, duration: Number(out.format.duration), formatName: out.format.format_name, codec: as.codec_name, audio: true };
   if (!vs) return null;
   return { width: vs.width, height: vs.height, duration: Number(out.format.duration), formatName: out.format.format_name, codec: vs.codec_name };
 }
 function formatOf(p, filename) {
   const ext = path.extname(filename || '').slice(1).toLowerCase();
+  if (p.audio) return /matroska|webm/.test(p.formatName) ? 'webm' : /ogg/.test(p.formatName) ? 'ogg' : /mp3/.test(p.formatName) ? 'mp3' : /mov|mp4/.test(p.formatName) ? (ext === 'm4a' ? 'm4a' : 'mp4') : (ext || p.formatName.split(',')[0]);
   if (/matroska/.test(p.formatName)) return ext === 'mkv' ? 'mkv' : (/vp8|vp9|av1/.test(p.codec) ? 'webm' : 'mkv');
   if (/mov|mp4/.test(p.formatName)) return ['mov', '3gp', 'mp4'].includes(ext) ? ext : 'mp4';
   return ext || p.formatName.split(',')[0];
 }
 
+// A short voice note (sine tone, audio only).
+function makeAudio({ seconds = 3, ext = 'webm' } = {}) {
+  fs.mkdirSync(TMP, { recursive: true });
+  const file = path.join(TMP, `voice-${seconds}s.${ext}`);
+  if (fs.existsSync(file)) return file;
+  const codec = ext === 'webm' ? ['-c:a', 'libopus', '-b:a', '32k'] : ext === 'm4a' ? ['-c:a', 'aac', '-b:a', '48k'] : ['-c:a', 'libmp3lame'];
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `sine=frequency=330:duration=${seconds}`, ...codec, file]);
+  return file;
+}
 function startMockCloudinary({ uploadDelayMs = 0 } = {}) {
   const clouds = { [CLOUD]: { key: KEY, secret: SECRET }, [OTHER]: { key: OTHER_KEY, secret: OTHER_SECRET } };
   const resources = new Map(); // `${cloud}/${resource_type}/${public_id}` -> resource
@@ -83,6 +95,7 @@ function startMockCloudinary({ uploadDelayMs = 0 } = {}) {
       if (buf.length !== p.total) return err(res, 400, 'Chunks missing');
     }
     const id = crypto.randomBytes(8).toString('hex');
+    fs.mkdirSync(TMP, { recursive: true }); // cleanup() of an earlier run may have removed it
     const file = path.join(TMP, id + path.extname(req.file.originalname || '.mp4'));
     fs.writeFileSync(file, buf);
     let p = null; try { p = probe(file); } catch {}
@@ -94,11 +107,11 @@ function startMockCloudinary({ uploadDelayMs = 0 } = {}) {
     const version = Math.floor(Date.now() / 1000);
     const r = {
       asset_id: crypto.randomBytes(16).toString('hex'), public_id, version, format, resource_type: 'video', type: 'upload',
-      bytes: buf.length, width: p.width, height: p.height, duration: p.duration, folder: b.folder || '', asset_folder: b.folder || '',
+      bytes: buf.length, width: p.width || undefined, height: p.height || undefined, is_audio: p.audio ? true : undefined, duration: p.duration, folder: b.folder || '', asset_folder: b.folder || '',
       tags: b.tags ? b.tags.split(',') : [], context: Object.keys(ctx).length ? { custom: ctx } : undefined, created_at: new Date().toISOString(),
       secure_url: `${base}/${req.params.cloud}/video/upload/v${version}/${public_id}.${format}`, _file: file, _cloud: req.params.cloud,
     };
-    try { execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', '0.5', '-i', file, '-frames:v', '1', file + '.jpg']); r._poster = file + '.jpg'; } catch {}
+    if (!p.audio) try { execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', '0.5', '-i', file, '-frames:v', '1', file + '.jpg']); r._poster = file + '.jpg'; } catch {}
     resources.set(`${req.params.cloud}/video/${public_id}`, r);
     calls.upload.push({ cloud: req.params.cloud, params: b, chunked: !!range, bytes: buf.length, public_id });
     const { _file, _cloud, _poster, ...out } = r;
@@ -164,4 +177,4 @@ function startMockCloudinary({ uploadDelayMs = 0 } = {}) {
 }
 
 const cleanup = () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {} };
-module.exports = { cleanup, startMockCloudinary, makeVideo, probe, sign, CLOUD, KEY, SECRET, OTHER, cloudinaryUrl, TMP };
+module.exports = { makeAudio, cleanup, startMockCloudinary, makeVideo, probe, sign, CLOUD, KEY, SECRET, OTHER, cloudinaryUrl, TMP };

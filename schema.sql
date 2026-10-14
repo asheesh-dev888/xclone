@@ -199,3 +199,22 @@ CREATE TABLE IF NOT EXISTS monkey_thoughts(
   lang TEXT NOT NULL,
   thought TEXT NOT NULL,
   PRIMARY KEY(post_id, lang));
+
+-- Momo moods (classified with the thought) + outfits unlocked by milestones.
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS monkey_mood TEXT;
+ALTER TABLE monkey_thoughts ADD COLUMN IF NOT EXISTS mood TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS momo_outfit TEXT;
+-- Polls: 2–4 options, 1 hour – 7 days, one vote per user.
+CREATE TABLE IF NOT EXISTS polls(
+  post_id INTEGER PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  options JSONB NOT NULL,
+  ends_at BIGINT NOT NULL,
+  created_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS poll_votes(
+  post_id INTEGER NOT NULL REFERENCES polls(post_id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  option_idx INTEGER NOT NULL,
+  created_at BIGINT NOT NULL,
+  PRIMARY KEY(post_id, user_id));
+-- Voice posts: audio-only Cloudinary assets in post_videos.
+ALTER TABLE post_videos ADD COLUMN IF NOT EXISTS is_audio BOOLEAN NOT NULL DEFAULT FALSE;

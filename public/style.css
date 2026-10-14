@@ -767,3 +767,79 @@ body.reels-page .fab{display:none}
 .set-sec select{width:100%;background:var(--bg,#000);color:inherit;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font:inherit;margin-top:6px}
 .set-sec .small{font-size:13px;margin:2px 0 0}
 #push-btn[hidden]{display:none}
+/* Momo moods (classified with the thought): dance, hug + tear, laugh, shake, chin-scratch */
+.m-outfit,.m-tear,.m-brows,.m-laugh{display:none}
+.momo[data-outfit="cap"] .m-cap,.momo[data-outfit="sunglasses"] .m-shades,.momo[data-outfit="kurta"] .m-kurta,.momo[data-outfit="crown"] .m-crown{display:inline}
+.momo-svg{transform-origin:50% 80%}
+.momo[data-mood]:not([data-mood="thoughtful"]) .m-arm-think{opacity:0}
+.momo[data-mood]:not([data-mood="thoughtful"]) .m-arm-r{opacity:1}
+.momo[data-mood]:not([data-mood="thoughtful"]) .m-head{transform:none}
+.momo[data-mood="happy"] .momo-svg{animation:momo-dance .9s ease-in-out infinite}
+.momo[data-mood="happy"] .m-arm-l{transform-origin:85% 10%;animation:momo-wave .45s ease-in-out infinite alternate}
+.momo[data-mood="happy"] .m-arm-r{transform-origin:15% 10%;animation:momo-wave .45s ease-in-out -.22s infinite alternate}
+.momo[data-mood="sad"] .m-tear{display:inline;animation:momo-tear 1.6s ease-in infinite}
+.momo[data-mood="sad"] .m-arm-l{transform-origin:85% 10%;transform:rotate(-38deg) translate(4px,-2px)}
+.momo[data-mood="sad"] .m-arm-r{transform-origin:15% 10%;transform:rotate(38deg) translate(-4px,-2px)}
+.momo[data-mood="sad"] .m-head{transform:rotate(4deg) translateY(1.5px)}
+.momo[data-mood="sad"] .m-mouth{transform:scaleY(-1);transform-box:fill-box;transform-origin:50% 50%}
+.momo[data-mood="funny"] .m-mouth{display:none}
+.momo[data-mood="funny"] .m-laugh{display:inline}
+.momo[data-mood="funny"] .m-head{animation:momo-laugh .28s ease-in-out infinite alternate}
+.momo[data-mood="funny"] .m-eyes{transform:scaleY(.35);animation:none}
+.momo[data-mood="angry"] .momo-svg{animation:momo-shake .38s linear infinite}
+.momo[data-mood="angry"] .m-brows{display:inline}
+.momo[data-mood="angry"] .m-head circle[fill="#ff8fa3"]{fill:#ff3b3b;opacity:.8}
+.momo[data-mood="thoughtful"] .m-arm-think{opacity:1;transform-origin:20% 90%;animation:momo-scratch .5s ease-in-out infinite alternate}
+.momo[data-mood="thoughtful"] .m-arm-r{opacity:0}
+.momo[data-mood="thoughtful"] .m-head{transform:rotate(-6deg)}
+@keyframes momo-dance{0%,100%{transform:rotate(-7deg) translateY(0)}25%{transform:rotate(0) translateY(-5px)}50%{transform:rotate(7deg) translateY(0)}75%{transform:rotate(0) translateY(-5px)}}
+@keyframes momo-wave{from{transform:rotate(0)}to{transform:rotate(-30deg)}}
+@keyframes momo-tear{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(12px);opacity:0}}
+@keyframes momo-laugh{from{transform:translateY(0) rotate(-2deg)}to{transform:translateY(-2.5px) rotate(2deg)}}
+@keyframes momo-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-3px)}40%{transform:translateX(3px)}60%{transform:translateX(-2px)}80%{transform:translateX(2px)}}
+@keyframes momo-scratch{from{transform:rotate(0)}to{transform:rotate(-9deg)}}
+@media (prefers-reduced-motion: reduce){.momo[data-mood] *,.momo[data-mood] .momo-svg{animation:none!important}}
+.oc-fig[data-outfit="cap"] .m-cap,.oc-fig[data-outfit="sunglasses"] .m-shades,.oc-fig[data-outfit="kurta"] .m-kurta,.oc-fig[data-outfit="crown"] .m-crown{display:inline}
+.outfits{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:10px}
+.outfit-card{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 6px;border:1px solid var(--border);border-radius:14px;background:transparent;color:inherit;text-align:center;cursor:pointer}
+.outfit-card.on{border-color:var(--blue,#1d9bf0);box-shadow:0 0 0 1px var(--blue,#1d9bf0) inset}
+.outfit-card.locked{opacity:.55;cursor:not-allowed}
+.outfit-card .oc-fig{width:60px;height:72px;display:block}
+.outfit-card .oc-fig .momo-svg *{animation:none}
+.outfit-card small{color:var(--muted);font-size:11.5px;line-height:1.3}
+/* polls */
+.poll{margin-top:10px;display:flex;flex-direction:column;gap:7px}
+.poll-opt{border:1px solid var(--blue,#1d9bf0);color:var(--blue,#1d9bf0);background:transparent;border-radius:999px;padding:8px 14px;font-weight:700;text-align:center;cursor:pointer}
+.poll-opt:hover{background:rgba(29,155,240,.1)}
+.poll-res{position:relative;display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-radius:6px;overflow:hidden}
+.poll-res .pr-bar{position:absolute;left:0;top:0;bottom:0;background:rgba(113,118,123,.35);border-radius:6px}
+.poll-res.win .pr-bar{background:rgba(29,155,240,.45)}
+.poll-res .pr-l,.poll-res .pr-p{position:relative}
+.poll-res.win .pr-l,.poll-res.win .pr-p{font-weight:700}
+.poll-meta{color:var(--muted);font-size:13px}
+.poll-edit{border:1px solid var(--border);border-radius:14px;padding:10px;margin:8px 0;display:flex;flex-direction:column;gap:8px}
+.pe-opts{display:flex;flex-direction:column;gap:6px}
+.pe-opt,.pe-len{background:transparent;color:inherit;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font:inherit}
+.pe-add,.pe-remove{background:none;border:none;color:var(--blue,#1d9bf0);text-align:left;cursor:pointer;font:inherit;padding:2px}
+.pe-remove{color:#f4212e}
+.pe-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+.pe-add[hidden],.voice-box[hidden],.poll-edit[hidden]{display:none}
+/* voice */
+.voice{margin-top:10px;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:999px;padding:6px 14px 6px 6px;max-width:360px}
+.vo-play{width:36px;height:36px;border-radius:50%;background:var(--blue,#1d9bf0);color:#fff;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.vo-play .icon{width:18px;height:18px;fill:#fff}
+.voice.playing .vo-play{background:#f91880}
+.vo-track{flex:1;height:4px;background:rgba(113,118,123,.4);border-radius:2px;overflow:hidden}
+.vo-bar{height:100%;width:0;background:var(--blue,#1d9bf0)}
+.vo-time{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.voice-box{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:14px;padding:8px 10px;margin:8px 0;position:relative}
+.voice-box audio{height:32px;max-width:220px}
+.vb-stop{width:30px;height:30px;border-radius:50%;border:2px solid #f4212e;background:transparent;display:none;align-items:center;justify-content:center;cursor:pointer}
+.vb-stop span{width:11px;height:11px;background:#f4212e;border-radius:2px}
+.voice-box[data-state="recording"] .vb-stop{display:flex}
+.vb-dot{width:9px;height:9px;border-radius:50%;background:#f4212e;display:none;animation:momo-blink 1s infinite}
+.voice-box[data-state="recording"] .vb-dot{display:inline-block}
+.vb-time{font-variant-numeric:tabular-nums}
+.vb-status{color:var(--muted);font-size:13px;flex:1}
+.voice-box .x{position:static}
+.tool-voice,.tool-poll{background:none;border:none;cursor:pointer;padding:0}

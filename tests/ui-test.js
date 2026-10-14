@@ -24,6 +24,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     return c;
   };
   const errors = [];
+  if (process.env.UI_ONLY === 'batchc') { await batchCUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'settings') { await settingsUi(browser, errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'video') { // quick run of one section
     await videoUi(browser, errors, (m) => console.log('  ✓', m));
@@ -196,6 +197,8 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await idealUi(browser, errors, step);
   console.log('\n  Video posts + Reels');
   await videoUi(browser, errors, step);
+  console.log('\n  Polls, voice posts, Momo moods + outfits');
+  await batchCUi(errors, step);
   console.log('\n  Settings: language + push');
   await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -1496,4 +1499,90 @@ async function settingsUi(browser, errors, step) {
   await p.screenshot({ path: OUT + '/20-settings.png' });
   await ctx.request.delete(BASE + '/api/me', { data: { confirm: name } });
   await ctx.close();
+}
+
+// ---------- Batch C: polls, voice posts (fake microphone), Momo moods + outfits ----------
+async function batchCUi(errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
+  const { startMockGroq, startApp } = require('./ai-server');
+  const { startMockCloudinary } = require('./cloudinary-server');
+  const cld = await startMockCloudinary(), groq = await startMockGroq();
+  const app = await startApp({ port: 4226, ai: { baseUrl: groq.url }, env: { ...cld.env } });
+  const B = app.url;
+  const br = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
+  const rnd = Math.floor(Math.random() * 1e5);
+  const users = [];
+  const user = async (name, mood) => {
+    const ctx = await br.newContext({ viewport: { width: 1366, height: 900 }, permissions: ['microphone'] });
+    await ctx.route(B + '/api/monkey/**', (r) => r.fulfill({ json: { thought: 'Stub thought 🍌', mood: mood || 'happy', source: 'test' } }));
+    await ctx.addInitScript(() => { window.__momoMoods = []; });
+    const r = await ctx.request.post(B + '/api/signup', { data: { username: name + rnd, password: 'secret123', name: name.toUpperCase() + ' C' } });
+    if (!r.ok()) throw new Error('signup ' + name);
+    const page = await ctx.newPage(); page.on('pageerror', e => errors.push(e.message)); page.on('dialog', d => d.accept());
+    const u = { ctx, page, username: name + rnd }; users.push(u); return u;
+  };
+  try {
+    const a = await user('pollster', 'funny'), b = await user('voter');
+    const A = a.page, Bp = b.page;
+    // poll
+    await A.goto(B + '/home'); await A.waitForSelector('#home-composer, form[data-form="compose"]');
+    const f = A.locator('#center form[data-form="compose"]').first();
+    await f.locator('textarea').fill('Chai or coffee?');
+    await f.locator('.tool-poll').click();
+    const opts = f.locator('.pe-opt');
+    await opts.nth(0).fill('Chai'); await opts.nth(1).fill('Coffee');
+    await f.locator('[data-action="poll-add"]').click(); await opts.nth(2).fill('Both');
+    await f.locator('.pe-len').selectOption('60');
+    await f.locator('button[type=submit]').click();
+    await A.waitForSelector('#feed .poll .poll-opt');
+    const pid = await A.getAttribute('#feed .post:has(.poll)', 'data-post');
+    if ((await A.locator(`[data-poll="${pid}"] .poll-opt`).count()) !== 3) throw new Error('poll options not rendered');
+    step('composer: add a 3-choice, 1-hour poll; it shows up in the feed as vote buttons');
+    await Bp.goto(B + '/post/' + pid); await Bp.waitForSelector('.poll .poll-opt');
+    await Bp.locator('.poll .poll-opt', { hasText: 'Coffee' }).click();
+    await Bp.waitForSelector('.poll .poll-res.mine');
+    const txt = await Bp.textContent('.poll');
+    if (!/100%/.test(txt) || !/1 vote/.test(txt) || !/left/.test(txt)) throw new Error('results wrong: ' + txt);
+    step('voting shows the results (100% Coffee ✓, 1 vote, time left); one vote per user');
+    await Bp.screenshot({ path: OUT + '/21-poll.png', clip: await (await Bp.$('.focus')).boundingBox() });
+    // voice
+    await A.goto(B + '/home'); await A.waitForSelector('#center form[data-form="compose"] [data-action="voice-rec"]');
+    const g = A.locator('#center form[data-form="compose"]').first();
+    await g.locator('textarea').fill('A quick voice note');
+    await g.locator('[data-action="voice-rec"]').click();
+    await A.waitForSelector('#center .voice-box[data-state="recording"]');
+    await A.waitForTimeout(1800);
+    await g.locator('[data-action="voice-stop"]').click();
+    await A.waitForSelector('#center .voice-box[data-state="done"]', { timeout: 15000 });
+    await g.locator('button[type=submit]').click();
+    await A.waitForSelector('#feed .post .voice');
+    const up = cld.calls.upload.find(u => /voice/.test(u.params.tags || ''));
+    if (!up) throw new Error('voice note was not uploaded through the signed path');
+    const src = await A.getAttribute('#feed .post .voice audio', 'src');
+    if (!/\.mp3$/.test(src)) throw new Error('voice src ' + src);
+    step('record a voice note with the mic (fake device), it uploads to Cloudinary (signed, tagged voice) and posts with an inline player');
+    await A.locator('#feed .post .voice [data-action="voice-play"]').first().click();
+    await A.waitForTimeout(300);
+    step('inline player: tap to play/pause');
+    // outfits
+    await A.goto(B + '/settings'); await A.waitForSelector('.outfit-card[data-outfit-key="cap"]');
+    if (await A.locator('.outfit-card[data-outfit-key="sunglasses"].locked').count() !== 1) throw new Error('sunglasses should be locked');
+    await A.locator('.outfit-card[data-outfit-key="cap"]').click();
+    await A.waitForSelector('.outfit-card[data-outfit-key="cap"].on');
+    await A.screenshot({ path: OUT + '/22-outfits.png', clip: await (await A.$('#set-outfit')).boundingBox() });
+    step('outfit picker: cap unlocked by the first post, others locked with progress; picking it saves');
+    // Momo wears it + mood animation from the thought's mood
+    await A.goto(B + '/home'); await A.waitForSelector('#feed .post');
+    await A.waitForFunction(() => { const m = document.getElementById('momo'); return m && m.dataset.outfit === 'cap'; }, null, { timeout: 5000 });
+    await A.mouse.move(683, 450); await A.mouse.wheel(0, 300);
+    await A.waitForFunction(() => window.__momoMoods.includes('funny') && document.getElementById('momo').dataset.mood === 'funny', null, { timeout: 15000 });
+    const laugh = await A.evaluate(() => getComputedStyle(document.querySelector('#momo .m-laugh')).display);
+    if (laugh === 'none') throw new Error('laugh mouth not shown');
+    const box = await (await A.$('#momo')).boundingBox();
+    await A.screenshot({ path: OUT + '/23-momo-mood.png', clip: { x: Math.max(0, box.x - 120), y: Math.max(0, box.y - 90), width: 300, height: 220 } });
+    step('Momo wears the cap and plays the "funny" (laugh) animation for a funny thought');
+  } finally {
+    for (const u of users) { await u.ctx.request.delete(B + '/api/me', { data: { confirm: u.username } }).catch(() => {}); await u.ctx.close(); }
+    await br.close(); app.child.kill(); groq.srv.close(); await cld.close();
+  }
 }

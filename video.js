@@ -18,6 +18,10 @@ const MAX_POST_SECONDS = 180;
 const MAX_REEL_SECONDS = 90;
 const FORMATS = ['mp4', 'mov', 'webm', '3gp', 'mkv'];
 const FOLDER = 'zuzu';
+// Voice posts: audio recorded in the browser / app (≤ 30 s), uploaded the same signed way (Cloudinary stores audio as "video").
+const VOICE_FORMATS = ['webm', 'ogg', 'opus', 'mp3', 'm4a', 'aac', 'wav', 'mp4', '3gp', 'amr'];
+const MAX_VOICE_SECONDS = 30;
+const MAX_VOICE_BYTES = 5 * 1024 * 1024;
 // Delivery transformations (params sorted the way the SDKs write them, so the eager ones match the URLs exactly).
 const T_AUTO = 'c_limit,f_auto,q_auto,vc_auto,w_720';   // best format/codec per browser, max 720px wide
 const T_MP4 = 'c_limit,q_auto,vc_h264,w_720';            // universal H.264 MP4 fallback
@@ -69,11 +73,16 @@ function urls(cloud, publicId, version, duration) {
 
 // Columns added to the post SELECT (LEFT JOIN post_videos v) -> the `video` object the client renders.
 const SELECT_COLS = `v.public_id v_public_id, v.cloud_name v_cloud, v.version v_version, v.duration v_duration, v.width v_width,
-  v.height v_height, v.poster v_poster, v.is_reel v_is_reel`;
+  v.height v_height, v.poster v_poster, v.is_reel v_is_reel, v.is_audio v_is_audio`;
 const JOIN = 'LEFT JOIN post_videos v ON v.post_id=p.id';
 function videoOut(r) {
-  const { v_public_id, v_cloud, v_version, v_duration, v_width, v_height, v_poster, v_is_reel, ...rest } = r;
-  if (v_public_id) {
+  const { v_public_id, v_cloud, v_version, v_duration, v_width, v_height, v_poster, v_is_reel, v_is_audio, ...rest } = r;
+  rest.audio = null;
+  if (v_public_id && v_is_audio) {
+    const b = `${deliveryBase()}/${encodeURIComponent(v_cloud)}/video/upload`, ver = v_version ? `v${v_version}/` : '';
+    rest.audio = { public_id: v_public_id, duration: v_duration, src: `${b}/${ver}${encPid(v_public_id)}.mp3` };
+    rest.video = null;
+  } else if (v_public_id) {
     const u = urls(v_cloud, v_public_id, v_version, v_duration);
     rest.video = {
       public_id: v_public_id, duration: v_duration, width: v_width, height: v_height, is_reel: !!v_is_reel,
@@ -100,7 +109,7 @@ async function fetchResource(cfg, publicId) {
 }
 
 // Parse + verify the client's video claim. Only Cloudinary's metadata is trusted.
-async function verify(input, { userId, isReel }) {
+async function verify(input, { userId, isReel, voice = false }) {
   const cfg = config();
   if (!cfg) throw fail(503, 'Video uploads are not available right now');
   let v = input;
@@ -116,12 +125,22 @@ async function verify(input, { userId, isReel }) {
   }
   const res = await fetchResource(cfg, publicId);
   if (!res) throw fail(400, 'Video not found. It must be a video uploaded to ZuZu.');
-  if (res.resource_type !== 'video' || (res.type && res.type !== 'upload') || res.is_audio) throw fail(400, 'That file isn’t a video');
+  if (voice) {
+    if (res.resource_type !== 'video' || (res.type && res.type !== 'upload') || !(res.is_audio || (!res.width && !res.height))) throw fail(400, 'That file isn’t a voice recording');
+  } else if (res.resource_type !== 'video' || (res.type && res.type !== 'upload') || res.is_audio) throw fail(400, 'That file isn’t a video');
   const inFolder = String(res.public_id || publicId).startsWith(FOLDER + '/') || res.asset_folder === FOLDER || res.folder === FOLDER;
   if (!inFolder || (res.public_id && res.public_id !== publicId)) throw fail(400, 'That video wasn’t uploaded through ZuZu');
   const uid = res.context && res.context.custom && res.context.custom.uid;
   if (uid != null && String(uid) !== String(userId)) throw fail(403, 'You can only post videos you uploaded');
   const format = String(res.format || '').toLowerCase();
+  if (voice) {
+    if (!VOICE_FORMATS.includes(format)) throw fail(400, 'Unsupported audio format');
+    const bytes = Number(res.bytes), duration = Number(res.duration ?? v.duration);
+    if (!(bytes > 0) || bytes > MAX_VOICE_BYTES) throw fail(400, 'Voice recordings must be under 5 MB');
+    if (!(duration > 0)) throw fail(400, 'Couldn’t read the recording’s length');
+    if (duration > MAX_VOICE_SECONDS + 0.5) throw fail(400, `Voice posts can be up to ${MAX_VOICE_SECONDS} seconds`);
+    return { public_id: publicId, cloud_name: cfg.cloudName, version: Number(res.version) || null, format, duration, width: null, height: null, bytes, poster: null, audio: true };
+  }
   if (!FORMATS.includes(format)) throw fail(400, `Unsupported video format${format ? ' (' + format + ')' : ''}. Use MP4, MOV, WebM, 3GP or MKV.`);
   const bytes = Number(res.bytes);
   if (!(bytes > 0)) throw fail(400, 'That video is empty');
@@ -137,9 +156,9 @@ async function verify(input, { userId, isReel }) {
 }
 
 async function insert(db, client, postId, v, isReel) {
-  await db.run(`INSERT INTO post_videos(post_id,public_id,cloud_name,version,format,duration,width,height,bytes,poster,is_reel,created_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-  [postId, v.public_id, v.cloud_name, v.version, v.format, v.duration, v.width, v.height, v.bytes, v.poster, !!isReel, Date.now()], client);
+  await db.run(`INSERT INTO post_videos(post_id,public_id,cloud_name,version,format,duration,width,height,bytes,poster,is_reel,created_at,is_audio)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+  [postId, v.public_id, v.cloud_name, v.version, v.format, v.duration, v.width, v.height, v.bytes, v.poster, !!isReel && !v.audio, Date.now(), !!v.audio], client);
 }
 
 // ---------- deletion: signed destroy API, queued in video_deletions so failures are retried ----------
@@ -200,7 +219,14 @@ function register(app, { auth, h, db, getPosts }) {
     const t = Date.now(), recent = (signHits.get(req.user.id) || []).filter(x => t - x < 3600e3);
     if (recent.length >= intEnv('VIDEO_SIGN_RATE_MAX', 30)) return res.status(429).json({ error: 'Too many video uploads. Try again later.' });
     recent.push(t); signHits.set(req.user.id, recent);
-    const params = {
+    const voice = req.body && req.body.kind === 'voice';
+    const params = voice ? {
+      allowed_formats: VOICE_FORMATS.join(','),
+      context: `uid=${req.user.id}`,
+      folder: FOLDER,
+      tags: 'zuzu,voice',
+      timestamp: Math.floor(t / 1000),
+    } : {
       allowed_formats: FORMATS.join(','),
       context: `uid=${req.user.id}`,
       eager: EAGER,
@@ -218,7 +244,7 @@ function register(app, { auth, h, db, getPosts }) {
       uploadUrl: `${apiBase()}/${encodeURIComponent(cfg.cloudName)}/video/upload`,
       chunkSize: intEnv('VIDEO_CHUNK_SIZE', 10 * 1024 * 1024),
       chunkThreshold: intEnv('VIDEO_CHUNK_THRESHOLD', 20 * 1024 * 1024),
-      limits: { maxBytes: MAX_BYTES, maxSeconds: MAX_POST_SECONDS, maxReelSeconds: MAX_REEL_SECONDS, formats: FORMATS },
+      limits: voice ? { maxBytes: MAX_VOICE_BYTES, maxSeconds: MAX_VOICE_SECONDS, formats: VOICE_FORMATS } : { maxBytes: MAX_BYTES, maxSeconds: MAX_POST_SECONDS, maxReelSeconds: MAX_REEL_SECONDS, formats: FORMATS },
     });
   });
 
@@ -243,7 +269,7 @@ function register(app, { auth, h, db, getPosts }) {
     const cursor = parseInt(req.query.cursor || '0', 10) || 2 ** 31 - 1;
     const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10) || 10, 1), 30);
     const rows = await db.all(`SELECT v.post_id FROM post_videos v JOIN posts p ON p.id=v.post_id
-      WHERE v.is_reel AND p.parent_id IS NULL AND v.post_id < $1 ORDER BY v.post_id DESC LIMIT $2`, [cursor, limit + 1]);
+      WHERE v.is_reel AND NOT v.is_audio AND p.parent_id IS NULL AND v.post_id < $1 ORDER BY v.post_id DESC LIMIT $2`, [cursor, limit + 1]);
     const more = rows.length > limit;
     const ids = rows.slice(0, limit).map(r => r.post_id);
     const map = await getPosts(ids, req.user.id);
@@ -254,5 +280,5 @@ function register(app, { auth, h, db, getPosts }) {
 
 module.exports = {
   register, enabled, config, verify, insert, videoOut, queueForPost, flushDeletions, flushSoon, signParams, urls,
-  SELECT_COLS, JOIN, MAX_BYTES, MAX_POST_SECONDS, MAX_REEL_SECONDS, FORMATS, FOLDER, EAGER,
+  SELECT_COLS, JOIN, MAX_VOICE_SECONDS, VOICE_FORMATS, MAX_BYTES, MAX_POST_SECONDS, MAX_REEL_SECONDS, FORMATS, FOLDER, EAGER,
 };
