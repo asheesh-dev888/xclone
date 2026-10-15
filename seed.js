@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 
 const users = [
   ['demo', 'Demo User', 'Just trying out ZuZu 👋', 'Bengaluru, India'],
-  ['zuzu_builder', 'ZuZu Builder', 'Building ZuZu in public. Say hi!', 'India'],
+  ['zuzu_builder', 'naadbro😊', 'Building ZuZu in public. Say hi!', 'India'],
   ['priya_codes', 'Priya Sharma', 'Full-stack dev · chai enthusiast ☕ · open source', 'Pune'],
   ['rahul_cricket', 'Rahul Verma', 'Cricket, stats and hot takes 🏏', 'Mumbai'],
   ['spacenerd', 'Meera Iyer', 'Astrophysics PhD student. Stars > people (mostly).', 'Chennai'],

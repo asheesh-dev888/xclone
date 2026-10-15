@@ -281,3 +281,6 @@ CREATE TABLE IF NOT EXISTS auth_attempts(
   key TEXT NOT NULL,
   at BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS auth_attempts_key ON auth_attempts(key, at);
+
+-- Demo account display name (only if still the previous default; never overwrites later edits).
+UPDATE users SET name = 'naadbro😊' WHERE username = 'zuzu_builder' AND name = 'ZuZu Builder';
