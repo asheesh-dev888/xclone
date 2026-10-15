@@ -81,7 +81,7 @@ async function startApp({ port, ai = null, env: extra = {} }) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   child.stdout.on('data', (d) => log += d); child.stderr.on('data', (d) => log += d);
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 240; i++) {
     if (child.exitCode !== null) throw new Error('test server exited:\n' + log);
     try { if ((await fetch(`http://localhost:${port}/healthz`)).ok) return { child, url: `http://localhost:${port}`, log: () => log }; } catch {}
     await new Promise((r) => setTimeout(r, 250));

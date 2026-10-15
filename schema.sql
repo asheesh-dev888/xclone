@@ -258,3 +258,26 @@ UPDATE users SET username = 'zuzu_builder', name = 'ZuZu Builder',
   bio = CASE WHEN bio = 'Builder. Curious about everything.' THEN 'Building ZuZu in public. Say hi!' ELSE bio END
 WHERE lower(username) = 'akhil' AND is_demo AND google_id IS NULL
   AND NOT EXISTS (SELECT 1 FROM users WHERE lower(username) = 'zuzu_builder');
+
+-- Password reset: hashed recovery code, optional verified email, single-use reset tokens, DB-backed rate limits.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+DO $$ BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(lower(email)) WHERE email IS NOT NULL;
+EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'duplicate emails: unique index skipped';
+END $$;
+UPDATE users SET email_verified = TRUE WHERE google_id IS NOT NULL AND email IS NOT NULL AND NOT email_verified;
+CREATE TABLE IF NOT EXISTS auth_tokens(
+  token_hash TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email TEXT,
+  expires_at BIGINT NOT NULL,
+  used_at BIGINT,
+  created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS auth_tokens_user ON auth_tokens(user_id, kind);
+CREATE TABLE IF NOT EXISTS auth_attempts(
+  key TEXT NOT NULL,
+  at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS auth_attempts_key ON auth_attempts(key, at);

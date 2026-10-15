@@ -143,6 +143,8 @@ const routes = [
   [/^\/$/, () => go(state.me ? '/home' : '/login', true)],
   [/^\/login$/, () => viewAuth('login')],
   [/^\/signup$/, () => viewAuth('signup')],
+  [/^\/forgot$/, () => viewForgot()],
+  [/^\/reset$/, () => viewReset()],
   [/^\/home$/, () => viewHome()],
   [/^\/explore$/, () => viewExplore()],
   [/^\/notifications$/, () => viewNotifications()],
@@ -154,7 +156,7 @@ const routes = [
   [/^\/u\/([\w.]+)\/(followers|following)$/, (m) => viewFollowList(m[1], m[2])],
   [/^\/u\/([\w.]+)(?:\/(replies|media|reels|likes))?$/, (m) => viewProfile(m[1], m[2] || 'posts')],
 ];
-const PUBLIC = ['/login', '/signup'];
+const PUBLIC = ['/login', '/signup', '/forgot', '/reset'];
 function go(url, replace) {
   if (replace) history.replaceState({}, '', url); else history.pushState({}, '', url);
   render();
@@ -429,10 +431,12 @@ document.addEventListener('submit', async (e) => {
         const r = readIdeal($('#signup-ideal', f));
         if (r.error) { idealError($('#signup-ideal', f), r.error); btn.disabled = false; return; }
         if (r.ideal) body.ideal = r.ideal;
+        if (f.email.value.trim()) body.email = f.email.value.trim();
       }
-      const { user } = await api('POST', '/api/' + mode, body);
+      const { user, recovery_code } = await api('POST', '/api/' + mode, body);
       state.me = user; state.unread = 0;
       await refreshMe();
+      if (recovery_code) return showRecoveryCode(recovery_code, () => go('/home', true), { title: 'Save your recovery code' });
       go('/home', true);
     } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
     return;
@@ -708,10 +712,12 @@ function viewAuth(mode) {
         ${signup ? `<div class="field"><label>Name</label><input name="name" maxlength="50" autocomplete="name"></div>` : ''}
         <div class="field"><label>Username</label><input name="username" required autocapitalize="none" autocomplete="username" ${signup ? 'placeholder="your_handle" autocorrect="off" spellcheck="false"' : ''}></div>
         <div class="field"><label>Password</label><input name="password" type="password" required ${signup ? 'minlength="6" autocomplete="new-password"' : 'autocomplete="current-password"'}></div>
+        ${signup ? `<div class="field"><label>Email <span class="muted">(optional, for password reset)</span></label><input name="email" type="email" maxlength="254" autocomplete="email" placeholder="you@example.com"></div>` : ''}
         ${signup ? idealPicker('signup-ideal', null) : ''}
         <button class="btn btn-light" type="submit">${signup ? 'Create account' : 'Log in'}</button>
         <div class="err" role="alert">${googleError ? 'Couldn’t sign in with Google. Please try again, or use your username and password.' : ''}</div>
       </form>
+      ${signup ? '' : `<div class="alt"><a href="/forgot" data-link>Forgot password?</a></div>`}
       <div class="alt">${signup ? 'Already have an account? <a href="/login" data-link>Sign in</a>' : 'Don’t have an account? <a href="/signup" data-link>Sign up</a>'}</div>
       ${authAppLink()}
       ${signup ? '' : `<div class="demo">Demo login: <b>demo</b> / <b>demo1234</b></div>`}
@@ -735,6 +741,7 @@ function viewHome() {
       <button class="tab ${t === 'following' ? 'active' : ''}" data-action="home-tab" data-tab="following">Following</button>
     </div></div>
     ${appBanner()}
+    ${state.me.account && !state.me.account.has_recovery_code && !sessionStorage.getItem('zuzu.noRecBanner') ? `<div class="rec-banner"><span>🔑 Set up a recovery code so you can get back in if you forget your password.</span><a class="btn btn-outline" href="/settings#set-recovery" data-link>Set up</a><button class="x" data-action="rec-dismiss" aria-label="Dismiss">${ic('close', 'icon')}</button></div>` : ''}
     <div id="stories-bar" class="stories-bar"></div>
     <div id="daily-banner"></div>
     ${idealPrompt()}
@@ -2217,7 +2224,7 @@ addEventListener('popstate', momoSync);
 
 // ---------- boot ----------
 async function refreshMe() {
-  try { const r = await api('GET', '/api/me'); state.me = r.user; state.admin = !!r.admin; state.unread = r.unread || 0; state.dmUnread = r.dm_unread || 0; state.prefs = r.prefs || null; if (state.prefs && window.ZUZU_I18N && state.prefs.ui_lang !== ZUZU_I18N.get()) ZUZU_I18N.set(state.prefs.ui_lang); } catch { state.me = null; }
+  try { const r = await api('GET', '/api/me'); state.me = r.user; if (state.me) state.me.account = r.account || null; state.admin = !!r.admin; state.unread = r.unread || 0; state.dmUnread = r.dm_unread || 0; state.prefs = r.prefs || null; if (state.prefs && window.ZUZU_I18N && state.prefs.ui_lang !== ZUZU_I18N.get()) ZUZU_I18N.set(state.prefs.ui_lang); } catch { state.me = null; }
 }
 setInterval(async () => {
   if (!state.me || document.hidden) return;
@@ -2370,6 +2377,18 @@ function viewSettings() {
     <div class="settings" id="settings">
       <section class="set-sec" id="set-account"><h2>Account</h2><p class="muted">Signed in as <b>@${esc(u.username)}</b></p>
         <button class="btn btn-outline" data-action="logout">${ic('logout')} Log out</button></section>
+      <section class="set-sec" id="set-password"><h2>Change password</h2>
+        <form data-form="change-password" autocomplete="off"><div class="field"><label>Current password</label><input name="current" type="password" autocomplete="current-password" required></div>
+        <div class="field"><label>New password</label><input name="new_password" type="password" minlength="6" autocomplete="new-password" required></div>
+        <p class="muted small">Other devices will be signed out.</p><button class="btn btn-outline" type="submit">Change password</button></form></section>
+      <section class="set-sec" id="set-recovery"><h2>Recovery code</h2>
+        <p class="muted" id="rec-status">${state.me.account && state.me.account.has_recovery_code ? 'You have a recovery code. Generating a new one replaces it.' : 'You don’t have a recovery code yet. Make one and keep it somewhere safe.'}</p>
+        <form data-form="regen-code" autocomplete="off"><div class="field"><label>Your password</label><input name="password" type="password" autocomplete="current-password" required></div>
+        <button class="btn btn-outline" type="submit">${state.me.account && state.me.account.has_recovery_code ? 'Generate a new code' : 'Generate my code'}</button></form></section>
+      <section class="set-sec" id="set-email"><h2>Email</h2>
+        <p class="muted" id="email-status">${emailStatus(state.me.account)}</p>
+        <form data-form="set-email" autocomplete="off"><div class="field"><label>Email address</label><input name="email" type="email" maxlength="254" value="${esc((state.me.account && state.me.account.email) || '')}" placeholder="you@example.com"></div>
+        <button class="btn btn-outline" type="submit">Save email</button></form></section>
       <section class="set-sec" id="set-lang"><h2>Language</h2>
         <div class="field"><label for="set-ui-lang">App language</label><select id="set-ui-lang" data-pref="ui_lang">${[['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ui_lang || ZUZU_I18N.get()) === k ? ' selected' : ''} data-noi18n>${l}</option>`).join('')}</select></div>
         <div class="field"><label for="set-ai-lang">AI language</label><p class="muted small">ZuZu AI answers and Momo’s thoughts</p><select id="set-ai-lang" data-pref="ai_lang">${[['auto', 'Same as the post'], ['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ai_lang || 'auto') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div></section>
@@ -2383,6 +2402,7 @@ function viewSettings() {
           <button class="btn btn-danger" type="submit" disabled>Delete my account</button></form></section>
     </div>`, { active: '' });
   pushStatus(); loadOutfits();
+  if (location.hash === '#set-recovery') $('#set-recovery')?.scrollIntoView();
 }
 async function loadOutfits() {
   const el = $('#outfits'); if (!el) return;
@@ -2736,6 +2756,98 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('click', (e) => { if (stories.viewer && e.target.closest('.sv-vu')) storyClose(true); }, true);
 addEventListener('popstate', () => storyClose(true));
+
+// ---------- Password change, recovery code, email reset ----------
+function emailStatus(a) {
+  if (!a || !a.email) return 'Add an email so you can reset your password by email.';
+  if (a.email_verified) return `${a.email} ✓ confirmed`;
+  return `${a.email} — ${state.config.email ? 'check your inbox for the confirmation link.' : 'verification coming soon.'}`;
+}
+function showRecoveryCode(code, done, { title = 'Your new recovery code' } = {}) {
+  const el = document.createElement('div'); el.className = 'modal-bg rec-modal'; el.setAttribute('role', 'dialog');
+  el.innerHTML = `<div class="modal"><div class="modal-head"><h2>${esc(title)}</h2></div><div class="rec-body">
+    <p>This code lets you reset your password if you forget it. <b>It’s shown only once</b>, so save it somewhere safe. Each code works one time.</p>
+    <div class="rec-code" data-noi18n>${esc(code)}</div>
+    <div class="rec-acts"><button class="btn btn-outline" data-rec="copy">Copy</button><button class="btn btn-outline" data-rec="download">Download</button></div>
+    <label class="rec-ok"><input type="checkbox" data-rec="ok"> I’ve saved my recovery code</label>
+    <button class="btn btn-primary" data-rec="done" disabled style="width:100%">Continue</button></div></div>`;
+  document.body.appendChild(el); document.body.style.overflow = 'hidden';
+  el.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-rec]'); if (!t) return;
+    const k = t.dataset.rec;
+    if (k === 'copy') { try { await navigator.clipboard.writeText(code); toast('Copied'); } catch { toast('Couldn’t copy. Select the code and copy it.'); } }
+    else if (k === 'download') {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([`ZuZu recovery code${state.me ? ' for @' + state.me.username : ''}\n${code}\nKeep this safe. It works once.\n`], { type: 'text/plain' }));
+      a.download = 'zuzu-recovery-code.txt'; document.body.appendChild(a); a.click(); a.remove();
+    } else if (k === 'done') { el.remove(); document.body.style.overflow = ''; done && done(); }
+  });
+  el.addEventListener('change', (e) => { if (e.target.dataset.rec === 'ok') $('[data-rec="done"]', el).disabled = !e.target.checked; });
+}
+function viewForgot() {
+  const em = state.config.email;
+  $('#app').innerHTML = `<div class="auth"><div class="bigx"><div class="brand">${ic('z', '')}<span class="wordmark">ZuZu</span></div></div><div class="panel">
+    <h1>Forgot password?</h1>
+    <div class="tabs fp-tabs"><button class="tab active" data-fp="code">Recovery code</button>${em ? `<button class="tab" data-fp="email">Email link</button>` : ''}</div>
+    <form data-form="forgot-code" autocomplete="off">
+      <div class="field"><label>Username</label><input name="username" required autocapitalize="none" autocomplete="username"></div>
+      <div class="field"><label>Recovery code</label><input name="code" required autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off"></div>
+      <div class="field"><label>New password</label><input name="new_password" type="password" minlength="6" required autocomplete="new-password"></div>
+      <button class="btn btn-light" type="submit">Reset password</button><div class="err" role="alert"></div></form>
+    ${em ? `<form data-form="forgot-email" autocomplete="off" hidden>
+      <div class="field"><label>Username or email</label><input name="login" required autocapitalize="none" autocomplete="username"></div>
+      <button class="btn btn-light" type="submit">Send reset link to my email</button><div class="err" role="alert"></div></form>` : ''}
+    <div class="alt"><a href="/login" data-link>Back to sign in</a></div></div></div>`;
+}
+function viewReset() {
+  const token = new URLSearchParams(location.search).get('token') || '';
+  $('#app').innerHTML = `<div class="auth"><div class="bigx"><div class="brand">${ic('z', '')}<span class="wordmark">ZuZu</span></div></div><div class="panel">
+    <h1>Choose a new password</h1>
+    <form data-form="reset-pw" data-token="${esc(token)}" autocomplete="off">
+      <div class="field"><label>New password</label><input name="new_password" type="password" minlength="6" required autocomplete="new-password"></div>
+      <button class="btn btn-light" type="submit">Set new password</button><div class="err" role="alert">${token ? '' : 'This reset link is missing its token.'}</div></form>
+    <div class="alt"><a href="/forgot" data-link>Request a new link</a></div></div></div>`;
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-fp]'); if (t) {
+    e.preventDefault(); $$('[data-fp]').forEach(b => b.classList.toggle('active', b === t));
+    $('form[data-form="forgot-code"]').hidden = t.dataset.fp !== 'code'; const fe = $('form[data-form="forgot-email"]'); if (fe) fe.hidden = t.dataset.fp !== 'email';
+    return;
+  }
+  if (e.target.closest('[data-action="rec-dismiss"]')) { e.preventDefault(); e.stopImmediatePropagation(); try { sessionStorage.setItem('zuzu.noRecBanner', '1'); } catch {} $('.rec-banner')?.remove(); }
+}, true);
+document.addEventListener('submit', async (e) => {
+  const f = e.target, k = f.dataset && f.dataset.form;
+  if (!['forgot-code', 'forgot-email', 'reset-pw', 'change-password', 'regen-code', 'set-email'].includes(k)) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  const btn = $('button[type=submit]', f), err = $('.err', f); if (err) err.textContent = '';
+  btn.disabled = true;
+  const fail = (m) => { if (err) err.textContent = m; else toast(m); };
+  try {
+    if (k === 'forgot-code') {
+      const r = await api('POST', '/api/password/recover', { username: f.username.value.trim(), code: f.code.value.trim(), new_password: f.new_password.value });
+      state.me = r.user; await refreshMe();
+      showRecoveryCode(r.recovery_code, () => { toast('Password updated'); go('/home', true); }, { title: 'Password reset. Here’s your new recovery code' });
+    } else if (k === 'forgot-email') {
+      const r = await api('POST', '/api/password/email', { login: f.login.value.trim() });
+      f.innerHTML = `<p class="rec-sent">${esc(r.message)}</p>`;
+    } else if (k === 'reset-pw') {
+      const r = await api('POST', '/api/password/reset', { token: f.dataset.token, new_password: f.new_password.value });
+      toast('Password updated. Please sign in.'); go('/login', true);
+    } else if (k === 'change-password') {
+      await api('POST', '/api/me/password', { current: f.current.value, new_password: f.new_password.value });
+      f.reset(); toast('Password changed. Other devices were signed out.');
+    } else if (k === 'regen-code') {
+      const r = await api('POST', '/api/me/recovery-code', { password: f.password.value });
+      f.reset(); await refreshMe();
+      showRecoveryCode(r.recovery_code, () => viewSettings());
+    } else if (k === 'set-email') {
+      const r = await api('PUT', '/api/me/email', { email: f.email.value.trim() });
+      state.me.account = r.account; $('#email-status').textContent = emailStatus(r.account);
+      toast(f.email.value.trim() ? (r.sent ? 'Confirmation email sent' : 'Email saved') : 'Email removed');
+    }
+  } catch (ex) { fail(ex.message); }
+  btn.disabled = false;
+}, true);
 
 async function loadConfig() {
   try { state.config = await api('GET', '/api/config'); } catch {}

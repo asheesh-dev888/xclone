@@ -15,6 +15,7 @@ function client() {
   return c;
 }
 (async () => {
+  if (process.env.API_ONLY === 'recovery') { await recoveryTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'admin') { await adminTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'batchd') { await batchDTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
   if (process.env.API_ONLY === 'batchc') { await batchCTests(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }
@@ -86,6 +87,7 @@ function client() {
   await pushTests();
   await batchCTests();
   await batchDTests();
+  await recoveryTests();
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });
 
@@ -1516,5 +1518,103 @@ async function batchDTests() {
   } finally {
     for (const [fn, u] of [[a, ua], [b, ub], [c, uc]]) await fn('DELETE', '/api/me', { confirm: u }).catch(() => {});
     await pg.end(); app.child.kill(); cld.close ? cld.close() : cld.srv && cld.srv.close();
+  }
+}
+
+async function recoveryTests() {
+  console.log('\n  Password change, recovery codes, email reset');
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) { console.log('  (skipping: needs a local server)'); return; }
+  const { startApp } = require('./ai-server');
+  const express = require('express');
+  const recovery = require('../recovery');
+  // mock mail provider (Resend-compatible)
+  const mails = []; const mapp = express(); mapp.use(express.json());
+  mapp.post('/emails', (req, res) => { if (req.headers.authorization !== 'Bearer re_test') return res.status(401).end(); mails.push(req.body); res.json({ id: 'm' + mails.length }); });
+  const msrv = mapp.listen(0, '127.0.0.1'); await new Promise(r => msrv.on('listening', r));
+  const mbase = `http://127.0.0.1:${msrv.address().port}`;
+  const app = await startApp({ port: 4228, env: { RESEND_API_KEY: 're_test', MAIL_FROM: 'ZuZu <no-reply@example.test>', MAIL_API_BASE: mbase, PUBLIC_URL: 'http://localhost:4228', RECOVER_RATE_USER: '5' } });
+  const nomail = await startApp({ port: 4229, env: {} });
+  const mk = (base) => { let cookie = ''; const f = async (method, p, body) => {
+    const hd = {}; if (cookie) hd.cookie = cookie; let b;
+    if (body) { hd['content-type'] = 'application/json'; b = JSON.stringify(body); }
+    const res = await fetch(base + p, { method, headers: hd, body: b, redirect: 'manual' });
+    const sc = res.headers.get('set-cookie'); if (sc && /sid=/.test(sc)) cookie = sc.split(';')[0];
+    const text = await res.text(); let data = {}; try { data = JSON.parse(text); } catch {} return { status: res.status, data, text };
+  }; return f; };
+  const rnd = Math.floor(Math.random() * 1e6), ua = 'rc_a' + rnd, ub = 'rc_b' + rnd;
+  const a = mk(app.url), a2 = mk(app.url), b = mk(app.url);
+  const linkOf = (m) => (/(http:\/\/localhost:4228\/\S+?token=[0-9a-f]{64})/.exec(m.text) || [])[1];
+  let pw = 'secret123';
+  try {
+    ok(/^[A-HJ-NP-Z2-9]{4}(-[A-HJ-NP-Z2-9]{4}){3}$/.test(recovery.genCode()) && recovery.normCode(' abcd-efgh jklm npqr ') === 'ABCDEFGHJKLMNPQR', 'code format XXXX-XXXX-XXXX-XXXX');
+    let r = await a('POST', '/api/signup', { username: ua, password: pw, name: 'R A', email: 'RcA' + rnd + '@Example.test' });
+    let code = r.data.recovery_code;
+    ok(r.status === 200 && /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/.test(code || ''), 'signup returns a recovery code (shown once)');
+    ok((await (mk(nomail.url))('GET', '/api/config')).data.email === false && (await a('GET', '/api/config')).data.email === true, '/api/config email true only with a mail key + MAIL_FROM');
+    r = await a('GET', '/api/me');
+    ok(r.data.account.has_recovery_code && r.data.account.email === 'RcA' + rnd + '@Example.test' && !r.data.account.email_verified, '/api/me account: code set, email saved unverified');
+    const { Client } = require('pg'); const { localDbUrl } = require('./google-server'); const pg = new Client({ connectionString: localDbUrl() }); await pg.connect();
+    const hash = (await pg.query('SELECT recovery_hash FROM users WHERE username=$1', [ua])).rows[0].recovery_hash;
+    ok(/^\$2[aby]\$/.test(hash) && !hash.includes(code.replace(/-/g, '')), 'recovery code stored bcrypt-hashed');
+    // email verify
+    await new Promise(r => setTimeout(r, 200));
+    const vmail = mails.find(m => m.to[0].toLowerCase() === ('rca' + rnd + '@example.test'));
+    ok(vmail && /verify-email\?token=/.test(vmail.text) && vmail.from.includes('no-reply@example.test'), 'verification email sent via the HTTPS API');
+    r = await b('POST', '/api/signup', { username: ub, password: pw, email: 'rca' + rnd + '@EXAMPLE.test' });
+    ok(r.status === 409, 'email is unique (case-insensitive)');
+    await b('POST', '/api/signup', { username: ub, password: pw });
+    ok((await b('PUT', '/api/me/email', { email: 'RCA' + rnd + '@example.test' })).status === 409, 'can’t take another account’s email in settings');
+    ok((await b('PUT', '/api/me/email', { email: 'not-an-email' })).status === 400, 'invalid email rejected');
+    // reset by email before verifying: generic answer, no mail
+    let before = mails.length;
+    r = await mk(app.url)('POST', '/api/password/email', { login: ua });
+    ok(r.status === 200 && r.data.ok && mails.length === before, 'unverified email: generic answer, nothing sent');
+    r = await fetch(app.url + new URL(linkOf(vmail)).pathname + new URL(linkOf(vmail)).search); 
+    ok(/Email confirmed/.test(await r.text()), 'verification link confirms the email');
+    ok((await a('GET', '/api/me')).data.account.email_verified, 'email now verified');
+    // generic response for unknown accounts
+    const g1 = await mk(app.url)('POST', '/api/password/email', { login: 'nobody_' + rnd });
+    const g2 = await mk(app.url)('POST', '/api/password/email', { login: 'RCA' + rnd + '@example.test' });
+    ok(g1.status === 200 && JSON.stringify(g1.data) === JSON.stringify(g2.data), 'reset request: same response whether or not the account exists');
+    await new Promise(r => setTimeout(r, 300));
+    const rmail = mails[mails.length - 1];
+    const link = linkOf(rmail), token = link && new URL(link).searchParams.get('token');
+    ok(rmail && /\/reset\?token=/.test(link || '') && /30 minutes/.test(rmail.text), 'reset link emailed (30-minute, single use)');
+    const tokRow = (await pg.query('SELECT token_hash, expires_at - created_at d FROM auth_tokens WHERE kind=$1 ORDER BY created_at DESC LIMIT 1', ['reset'])).rows[0];
+    ok(tokRow.token_hash !== token && tokRow.token_hash === recovery.sha(token) && Number(tokRow.d) === 30 * 60e3, 'reset token stored hashed, expires in 30 min');
+    ok((await mk(app.url)('POST', '/api/password/reset', { token, new_password: '123' })).status === 400, 'reset: short password rejected');
+    r = await mk(app.url)('POST', '/api/password/reset', { token, new_password: 'viaEmail99' });
+    ok(r.status === 200 && r.data.username === ua, 'reset with the link');
+    ok((await a('GET', '/api/me')).data.user === null, 'all sessions signed out after an email reset');
+    ok((await mk(app.url)('POST', '/api/password/reset', { token, new_password: 'again1234' })).status === 400, 'reset link works only once');
+    pw = 'viaEmail99';
+    ok((await a('POST', '/api/login', { username: ua, password: pw })).status === 200, 'new password logs in');
+    await pg.query(`UPDATE auth_tokens SET expires_at=1 WHERE user_id=(SELECT id FROM users WHERE username=$1)`, [ua]);
+    // change password
+    await a2('POST', '/api/login', { username: ua, password: pw });
+    ok((await a('POST', '/api/me/password', { current: 'wrong', new_password: 'changed123' })).status === 401, 'change password: wrong current password rejected');
+    r = await a('POST', '/api/me/password', { current: pw, new_password: 'changed123' }); pw = 'changed123';
+    ok(r.status === 200 && (await a('GET', '/api/me')).data.user && (await a2('GET', '/api/me')).data.user === null, 'change password keeps this session, signs out the others');
+    // regenerate code
+    ok((await a('POST', '/api/me/recovery-code', { password: 'nope' })).status === 401, 'regenerate code needs the password');
+    r = await a('POST', '/api/me/recovery-code', { password: pw });
+    const old = code; code = r.data.recovery_code;
+    ok(r.status === 200 && code && code !== old, 'regenerate: new code shown once');
+    const rc = mk(app.url);
+    ok((await rc('POST', '/api/password/recover', { username: ua, code: old, new_password: 'recover123' })).status === 400, 'old code no longer works');
+    r = await rc('POST', '/api/password/recover', { username: ua.toUpperCase(), code: code.toLowerCase().replace(/-/g, ' '), new_password: 'recover123' });
+    ok(r.status === 200 && r.data.recovery_code && r.data.recovery_code !== code && (await rc('GET', '/api/me')).data.user.username === ua, 'recover with username + code (case/spacing tolerant): signed in, new code returned');
+    ok((await a('GET', '/api/me')).data.user === null, 'recovery signs out every other session');
+    ok((await mk(app.url)('POST', '/api/password/recover', { username: ua, code, new_password: 'again1234' })).status === 400, 'a used code is consumed');
+    // rate limit per username
+    const atk = mk(app.url); let last;
+    for (let i = 0; i < 6; i++) last = await atk('POST', '/api/password/recover', { username: ub, code: 'AAAA-AAAA-AAAA-AAAA', new_password: 'whatever1' });
+    ok(last.status === 429, 'recovery attempts are rate-limited per username');
+    ok((await mk(nomail.url)('POST', '/api/password/email', { login: ua })).status === 503, 'email reset unavailable without a mail key');
+    await pg.end();
+  } finally {
+    await mk(app.url)('POST', '/api/login', { username: ua, password: 'recover123' }).catch(() => {});
+    for (const [u, p] of [[ua, 'recover123'], [ub, 'secret123']]) { const c = mk(app.url); await c('POST', '/api/login', { username: u, password: p }); await c('DELETE', '/api/me', { confirm: u }); }
+    app.child.kill(); nomail.child.kill(); msrv.close();
   }
 }

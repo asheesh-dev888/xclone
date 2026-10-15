@@ -6,6 +6,7 @@
     hi: {
       'Daily thought': 'आज का विचार', 'Today’s thought': 'आज का विचार', 'Answer': 'जवाब दें', 'See answers': 'जवाब देखें', 'Featured': 'चुनिंदा', 'All answers': 'सभी जवाब', 'Share': 'शेयर करें',
       'Your story': 'आपकी स्टोरी', 'New story': 'नई स्टोरी', 'Share to story': 'स्टोरी में शेयर करें', 'Join': 'जुड़ें', 'Leave': 'छोड़ें', 'Members': 'सदस्य', 'Add': 'जोड़ें',
+      'Forgot password?': 'पासवर्ड भूल गए?', 'Change password': 'पासवर्ड बदलें', 'Recovery code': 'रिकवरी कोड', 'Email': 'ईमेल', 'Continue': 'आगे बढ़ें', 'Copy': 'कॉपी', 'Download': 'डाउनलोड',
       'Home': 'होम', 'Explore': 'खोजें', 'Reels': 'रील्स', 'Notifications': 'सूचनाएँ', 'Messages': 'संदेश', 'Profile': 'प्रोफ़ाइल', 'Admin': 'एडमिन', 'Settings': 'सेटिंग्स',
       'Post': 'पोस्ट', 'Posts': 'पोस्ट', 'Replies': 'जवाब', 'Media': 'मीडिया', 'Likes': 'पसंद', 'Reposts': 'रीपोस्ट', 'Followers': 'फ़ॉलोअर्स', 'Following': 'फ़ॉलो कर रहे हैं',
       'Follow': 'फ़ॉलो करें', 'Unfollow': 'अनफ़ॉलो करें', 'Follows you': 'आपको फ़ॉलो करता है', 'For you': 'आपके लिए', 'Reply': 'जवाब दें', 'Repost': 'रीपोस्ट', 'Like': 'पसंद', 'Share': 'शेयर करें',

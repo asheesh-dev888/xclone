@@ -15,6 +15,8 @@ const video = require('./video');
 const safety = require('./safety');
 const push = require('./push');
 const batchd = require('./batchd');
+const recovery = require('./recovery');
+const mail = require('./mail');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -81,7 +83,10 @@ app.post('/api/signup', h(async (req, res) => {
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   let ideal;
   try { ideal = ideals.parseIdeal((req.body || {}).ideal); } catch (e) { return res.status(400).json({ error: e.message }); }
+  let email = null;
+  try { email = recovery.cleanEmail((req.body || {}).email); } catch (e) { return res.status(400).json({ error: e.message }); }
   if (await findUser(username)) return res.status(409).json({ error: 'Username already taken' });
+  if (email && await db.get('SELECT 1 FROM users WHERE lower(email)=lower($1)', [email])) return res.status(409).json({ error: 'That email is already used by another account' });
   let u;
   try {
     u = await db.get(`INSERT INTO users(username,name,password_hash,created_at,ideal_name,ideal_preset_id,ideal_qualities)
@@ -92,8 +97,13 @@ app.post('/api/signup', h(async (req, res) => {
     if (e.code === '23505') return res.status(409).json({ error: 'Username already taken' });
     throw e;
   }
+  const recovery_code = await recovery.issueCode(db, u.id);
+  if (email) {
+    try { u = await db.get('UPDATE users SET email=$1 WHERE id=$2 RETURNING *', [email, u.id]); await recovery.sendVerify(db, u, email).catch(() => false); }
+    catch (e) { if (e.code !== '23505') throw e; }
+  }
   await startSession(res, u.id);
-  res.json({ user: publicUser(u) });
+  res.json({ user: publicUser(u), recovery_code });
 }));
 app.post('/api/login', h(async (req, res) => {
   const { username = '', password = '' } = req.body || {};
@@ -112,13 +122,13 @@ app.get('/api/me', h(async (req, res) => {
   const { c } = await db.get('SELECT COUNT(*)::int c FROM notifications WHERE user_id=$1 AND NOT read', [req.user.id]);
   const dm = await db.get(`SELECT COUNT(*)::int n FROM dm_members mb JOIN dm_messages m ON m.conversation_id=mb.conversation_id
     WHERE mb.user_id=$1 AND m.sender_id<>$1 AND m.created_at>mb.last_read_at`, [req.user.id]);
-  const out = { user: publicUser(req.user), unread: c, dm_unread: dm.n, prefs: { ui_lang: req.user.ui_lang || 'en', ai_lang: req.user.ai_lang || 'auto', momo_outfit: req.user.momo_outfit || null } };
+  const out = { user: publicUser(req.user), unread: c, dm_unread: dm.n, prefs: { ui_lang: req.user.ui_lang || 'en', ai_lang: req.user.ai_lang || 'auto', momo_outfit: req.user.momo_outfit || null }, account: recovery.accountOut(req.user) };
   if (admin.isAdminUser(req.user)) out.admin = true; // only admins see the flag (and the Admin nav item)
   res.json(out);
 }));
 
 // ---------- Continue with Google (OAuth 2.0 authorization code flow) ----------
-app.get('/api/config', (req, res) => res.json({ google: google.enabled(), ai: ai.enabled(), video: video.enabled() }));
+app.get('/api/config', (req, res) => res.json({ google: google.enabled(), ai: ai.enabled(), video: video.enabled(), email: mail.enabled() }));
 
 const G_COOKIE = 'g_oauth';
 const gCookieOpts = (req) => ({ httpOnly: true, sameSite: 'lax', secure: google.redirectUri(req).startsWith('https:'), path: '/auth/google' });
@@ -736,6 +746,9 @@ monkey.register(app, { auth, h, db, postIdParam });
 
 // ---------- Web Push + language preferences ----------
 push.register(app, { auth, h, db });
+
+// ---------- Change password, recovery codes, email + reset links ----------
+recovery.register(app, { auth, h, db, startSession, publicUser, findUser });
 
 // ---------- Daily thought challenge, ideal circles, stories ----------
 batchd.register(app, { auth, h, db, hydrate, getPosts, saveMedia, upload, now });

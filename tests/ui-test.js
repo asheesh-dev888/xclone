@@ -24,6 +24,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     return c;
   };
   const errors = [];
+  if (process.env.UI_ONLY === 'recovery') { await recoveryUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'batchd') { await batchDUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'batchc') { await batchCUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'settings') { await settingsUi(browser, errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
@@ -68,7 +69,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await page.fill('input[name=username]', u);
   await page.fill('input[name=password]', 'secret123');
   await page.click('button[type=submit]');
-  await page.waitForURL('**/home');
+  await waitHome(page);
   step('signed up as ' + u);
 
   // post
@@ -201,6 +202,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   console.log('\n  Polls, voice posts, Momo moods + outfits');
   await batchCUi(errors, step);
   await batchDUi(errors, step);
+  await recoveryUi(errors, step);
   console.log('\n  Settings: language + push');
   await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -866,7 +868,7 @@ async function idealUi(browser, errors, step) {
   if (cc.border !== 'rgb(236, 72, 153)' || cc.name !== 'My Grandmother' || cc.chips !== 'compassion,wisdom,discipline') throw new Error('custom card preview wrong: ' + JSON.stringify(cc));
   step('custom: name + up to 3 qualities; the first (Compassion) colours the card pink; 4th pick refused');
   await p.click('form[data-mode=signup] button[type=submit]');
-  await p.waitForURL('**/home');
+  await waitHome(p);
   if (await p.$('#ideal-prompt')) throw new Error('ideal prompt shown to a user who has an ideal');
   await p.goto(BASE + '/u/' + u1); await p.waitForSelector('.pf .ideal-badge');
   if ((await p.textContent('.pf .ideal-badge .lbl')) !== 'Ideal: My Grandmother') throw new Error('badge text: ' + await p.textContent('.pf .ideal-badge .lbl'));
@@ -898,7 +900,7 @@ async function idealUi(browser, errors, step) {
   const u2 = 'idkalam' + rnd;
   await p.goto(BASE + '/signup'); await p.waitForSelector('#signup-ideal .ideal-card');
   await fillAccount(p, u2); await p.click('[data-ideal-card=kalam]');
-  await p.click('form[data-mode=signup] button[type=submit]'); await p.waitForURL('**/home');
+  await p.click('form[data-mode=signup] button[type=submit]'); await waitHome(p);
   await p.fill('#home-composer textarea', 'Dream, dream, dream. Dreams transform into thoughts and thoughts result in action. #inspiration');
   await p.click('#home-composer button[type=submit]'); await p.waitForSelector('#feed .post .ideal-dot');
   await p.goto(BASE + '/u/' + u2); await p.waitForSelector('.pf .ideal-badge'); await p.waitForSelector('#feed .post');
@@ -914,7 +916,7 @@ async function idealUi(browser, errors, step) {
   await p.goto(BASE + '/signup'); await p.waitForSelector('#signup-ideal .ideal-card');
   await fillAccount(p, u3);
   await p.click('[data-ideal-card=tagore]'); await p.click('[data-ideal-card=skip]');
-  await p.click('form[data-mode=signup] button[type=submit]'); await p.waitForURL('**/home');
+  await p.click('form[data-mode=signup] button[type=submit]'); await waitHome(p);
   await p.waitForSelector('#ideal-prompt:has-text("Choose your ideal")');
   await p.click('#ideal-prompt [data-action=open-ideal]');
   await p.waitForSelector('.ideal-modal #ideal-modal-picker');
@@ -953,7 +955,7 @@ async function idealUi(browser, errors, step) {
   if (await p.evaluate(() => document.documentElement.scrollWidth) > 390) throw new Error('mobile overflow after selecting');
   await p.screenshot({ path: OUT + '/16-ideal-mobile.png' });
   step('mobile: tapping selects (Rani Lakshmibai, red ring) and the custom card opens its editor (screenshot 16-ideal-mobile.png)');
-  await p.locator('form[data-mode=signup] button[type=submit]').tap(); await p.waitForURL('**/home');
+  await p.locator('form[data-mode=signup] button[type=submit]').tap(); await waitHome(p);
   await p.goto(BASE + '/u/' + u4); await p.waitForSelector('.pf .ideal-badge');
   if (await badgeColor(p) !== 'rgb(239, 68, 68)') throw new Error('mobile Lakshmibai badge not red');
   if (await p.evaluate(() => document.documentElement.scrollWidth) > 390) throw new Error('mobile profile overflows');
@@ -1589,6 +1591,10 @@ async function batchCUi(errors, step) {
   }
 }
 
+async function waitHome(p) {
+  try { await p.waitForSelector('.rec-modal [data-rec=ok]', { timeout: 6000 }); await p.check('.rec-modal [data-rec=ok]'); await p.click('.rec-modal [data-rec=done]'); } catch {}
+  await p.waitForURL('**/home');
+}
 async function batchDUi(errors, step) {
   if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
   const { startApp } = require('./ai-server');
@@ -1670,4 +1676,67 @@ async function batchDUi(errors, step) {
     for (const u of users) { await u.ctx.request.delete(B + '/api/me', { data: { confirm: u.username } }).catch(() => {}); await u.ctx.close(); }
     await br.close(); app.child.kill(); await cld.close();
   }
+}
+
+async function recoveryUi(errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
+  const { startApp } = require('./ai-server');
+  const express = require('express');
+  const mails = []; const mapp = express(); mapp.use(express.json());
+  mapp.post('/emails', (req, res) => { mails.push(req.body); res.json({ id: 'x' }); });
+  const msrv = mapp.listen(0, '127.0.0.1'); await new Promise(r => msrv.on('listening', r));
+  const app = await startApp({ port: 4230, env: { MAIL_RATE_IP: '10000', MAIL_RATE_LOGIN: '10000', EMAIL_RATE_USER: '10000', RECOVER_RATE_IP: '10000', RESET_RATE_IP: '10000', RESEND_API_KEY: 're_t', MAIL_FROM: 'ZuZu <a@example.test>', MAIL_API_BASE: `http://127.0.0.1:${msrv.address().port}`, PUBLIC_URL: 'http://localhost:4230' } });
+  const B = app.url, rnd = Math.floor(Math.random() * 1e6), un = 'rcui' + rnd;
+  const br = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const ctx = await br.newContext({ viewport: { width: 1200, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const p = await ctx.newPage(); p.on('pageerror', e => errors.push(e.message));
+  try {
+    await p.goto(B + '/signup'); await p.waitForSelector('form[data-mode=signup]');
+    await p.fill('input[name=username]', un); await p.fill('input[name=password]', 'secret123'); await p.fill('input[name=email]', un + '@example.test');
+    await p.click('form[data-mode=signup] button[type=submit]');
+    await p.waitForSelector('.rec-modal .rec-code');
+    const code = (await p.textContent('.rec-code')).trim();
+    if (!/^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/.test(code)) throw new Error('code format ' + code);
+    if (!(await p.isDisabled('.rec-modal [data-rec=done]'))) throw new Error('Continue should be locked until saved');
+    await p.click('[data-rec=copy]'); if ((await p.evaluate(() => navigator.clipboard.readText())) !== code) throw new Error('copy failed');
+    const [dl] = await Promise.all([p.waitForEvent('download'), p.click('[data-rec=download]')]);
+    if (!/recovery/.test(dl.suggestedFilename())) throw new Error('download name');
+    await p.check('[data-rec=ok]'); await p.click('[data-rec=done]'); await p.waitForURL('**/home');
+    step('signup shows the recovery code once: copy + download work, Continue unlocks after “I’ve saved it”');
+    await p.goto(B + '/settings');
+    await p.fill('#set-password input[name=current]', 'secret123'); await p.fill('#set-password input[name=new_password]', 'newsecret1');
+    await p.click('#set-password button[type=submit]'); await p.waitForFunction(() => /Password changed/.test(document.querySelector('#toast').textContent));
+    await p.fill('#set-recovery input[name=password]', 'newsecret1'); await p.click('#set-recovery button[type=submit]');
+    await p.waitForSelector('.rec-modal .rec-code'); const code2 = (await p.textContent('.rec-code')).trim();
+    if (code2 === code) throw new Error('code not regenerated');
+    await p.check('[data-rec=ok]'); await p.click('[data-rec=done]');
+    if (!/not confirmed|inbox|check/.test(await p.textContent('#email-status'))) throw new Error('email status: ' + await p.textContent('#email-status'));
+    step('settings: change password and regenerate the recovery code (shown once)');
+    await ctx.request.post(B + '/api/logout'); await p.goto(B + '/login');
+    await p.click('a[href="/forgot"]'); await p.waitForSelector('form[data-form=forgot-code]');
+    if (!(await p.isVisible('[data-fp=email]'))) throw new Error('email option should show when configured');
+    await p.fill('form[data-form=forgot-code] [name=username]', un); await p.fill('form[data-form=forgot-code] [name=code]', code2.toLowerCase()); await p.fill('form[data-form=forgot-code] [name=new_password]', 'recovered1');
+    await p.click('form[data-form=forgot-code] button[type=submit]');
+    await p.waitForSelector('.rec-modal .rec-code'); const code3 = (await p.textContent('.rec-code')).trim();
+    if (code3 === code2) throw new Error('new code expected after use');
+    await p.check('[data-rec=ok]'); await p.click('[data-rec=done]'); await p.waitForURL('**/home');
+    step('Forgot password? → recovery code + new password signs you in and shows a fresh code');
+    await p.click('[data-action=me-menu]').catch(() => {});
+    await ctx.request.post(B + '/api/logout');
+    // email flow
+    await p.goto(B + '/forgot'); await p.click('[data-fp=email]');
+    await p.fill('form[data-form=forgot-email] [name=login]', 'nobody' + rnd); await p.click('form[data-form=forgot-email] button[type=submit]');
+    await p.waitForSelector('.rec-sent');
+    step('email option: generic confirmation message');
+    const vm = mails.find(m => /verify-email/.test(m.text)); const tok = /token=([0-9a-f]{64})/.exec(vm.text)[1];
+    await p.goto(B + '/verify-email?token=' + tok); await p.waitForSelector('text=Email confirmed');
+    await p.goto(B + '/forgot'); await p.click('[data-fp=email]'); await p.fill('form[data-form=forgot-email] [name=login]', un); await p.click('form[data-form=forgot-email] button[type=submit]'); await p.waitForSelector('.rec-sent');
+    await p.waitForFunction(() => true); await new Promise(r => setTimeout(r, 500));
+    const rt = /reset\?token=([0-9a-f]{64})/.exec(mails[mails.length - 1].text)[1];
+    await p.goto(B + '/reset?token=' + rt); await p.fill('form[data-form=reset-pw] [name=new_password]', 'viaemail1'); await p.click('form[data-form=reset-pw] button[type=submit]');
+    await p.waitForURL('**/login');
+    await p.fill('input[name=username]', un); await p.fill('input[name=password]', 'viaemail1'); await p.click('form[data-mode=login] button[type=submit]'); await p.waitForURL('**/home');
+    step('verify link → reset link → /reset page sets the new password and login works');
+    await p.goto(B + '/settings'); await p.fill('#del-confirm', un); await p.click('form[data-form=delete-account] button[type=submit]'); await p.waitForFunction(async () => (await (await fetch('/api/me')).json()).user === null);
+  } finally { await br.close(); app.child.kill(); msrv.close(); }
 }
