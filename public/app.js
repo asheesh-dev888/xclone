@@ -1842,7 +1842,7 @@ try { const saved = JSON.parse(sessionStorage.getItem('zuzu.momoThoughts') || '[
 const momoReduced = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 const momoSoundOn = () => store('localStorage', 'zuzu.momoSound') !== '0';
 const momoToggleHTML = (mobile) => mobile
-  ? `<button class="momo-mtoggle" data-action="momo-toggle" aria-pressed="${momoOn()}" aria-label="Show Momo 🐒" title="Show Momo 🐒">🐒</button><button class="momo-mtoggle momo-stoggle" data-action="momo-sound" aria-pressed="${momoSoundOn()}" aria-label="Momo sounds" title="Momo sounds">${momoSoundOn() ? '🔊' : '🔇'}</button>`
+  ? `<button class="momo-mtoggle" data-action="momo-toggle" aria-pressed="${momoOn()}" aria-label="Show Momo 🐒" title="Show Momo 🐒">🐒</button><button class="momo-stoggle" data-action="momo-sound" aria-pressed="${momoSoundOn()}" aria-label="Momo sounds" title="Momo sounds">${momoSoundOn() ? '🔊' : '🔇'}</button>`
   : `<button class="nav-item nav-momo" data-action="momo-toggle" aria-pressed="${momoOn()}" title="Show Momo 🐒"><span class="momo-switch" aria-hidden="true"><span></span></span><span class="lbl">Show Momo 🐒</span></button><button class="nav-item nav-momo-snd" data-action="momo-sound" aria-pressed="${momoSoundOn()}" title="Momo sounds"><span class="momo-switch" aria-hidden="true"><span></span></span><span class="lbl">Momo sounds <span class="snd-ic">${momoSoundOn() ? '🔊' : '🔇'}</span></span></button>`;
 
 const MOMO_SVG = `<svg class="momo-svg" viewBox="0 0 100 120" aria-hidden="true">
