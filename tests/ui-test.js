@@ -24,6 +24,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     return c;
   };
   const errors = [];
+  if (process.env.UI_ONLY === 'sound') { await momoSoundUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'momo') { await momoReactUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'recovery') { await recoveryUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'batchd') { await batchDUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
@@ -205,6 +206,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await batchDUi(errors, step);
   await recoveryUi(errors, step);
   await momoReactUi(errors, step);
+  await momoSoundUi(errors, step);
   console.log('\n  Settings: language + push');
   await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -1667,6 +1669,98 @@ async function momoReactUi(errors, step) {
     const rm = await rp.evaluate(() => ({ an: getComputedStyle(document.querySelector('#momo .momo-fig')).animationName, fx: document.querySelectorAll('#momo .momo-fx').length }));
     if (rm.an !== 'momo-wiggle' || rm.fx) throw new Error('reduced motion: ' + JSON.stringify(rm));
     step('prefers-reduced-motion: reactions reduce to a simple wiggle (no flying effects)');
+    await ctx.request.delete(B + '/api/me', { data: { confirm: un } }).catch(() => {});
+  } finally { await br.close(); app.child.kill(); }
+}
+
+async function momoSoundUi(errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
+  console.log('\n  Momo sounds + voice');
+  const { startApp } = require('./ai-server');
+  const app = await startApp({ port: 4232 });
+  const B = app.url, rnd = Math.floor(Math.random() * 1e6), un = 'msui' + rnd;
+  const br = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const ctx = await br.newContext({ viewport: { width: 1200, height: 900 } });
+  await ctx.addInitScript(() => {
+    window.__momoSounds = []; window.__momoSpoken = []; window.__cancels = 0;
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: { speak() {}, cancel() { window.__cancels++; }, getVoices() { return []; } } });
+  });
+  const p = await ctx.newPage(); p.on('pageerror', e => errors.push(e.message));
+  try {
+    await p.goto(B + '/signup'); await p.waitForSelector('form[data-mode=signup]');
+    await p.fill('input[name=username]', un); await p.fill('input[name=password]', 'secret123');
+    await p.click('form[data-mode=signup] button[type=submit]'); await waitHome(p);
+    for (const t of ['lol this is hilarious 😂', 'Congratulations on the promotion! 🎉', 'so much love ❤️ for family']) await ctx.request.post(B + '/api/posts', { multipart: { text: t } });
+    await p.goto(B + '/home'); await p.waitForSelector('#feed .post'); await p.waitForFunction(() => document.getElementById('momo') && !document.getElementById('momo').hidden, null, { timeout: 10000 });
+    // defaults
+    if (await p.evaluate(() => localStorage.getItem('zuzu.momoSound')) !== null) throw new Error('sound should default on (no stored value)');
+    if ((await p.getAttribute('.nav-momo-snd', 'aria-pressed')) !== 'true') throw new Error('sound toggle not on by default');
+    step('sound toggle sits next to the Momo switch, on by default');
+    // autoplay rules: nothing plays before a user gesture
+    await p.evaluate(() => { __momoApi.snd.last = -1e9; __momoApi.snd.busyUntil = 0; __momoApi.snd.unlocked = false; __momoApi.react('funny', 1); });
+    if ((await p.evaluate(() => window.__momoSounds.length)) !== 0) throw new Error('played before a user gesture');
+    await p.mouse.click(5, 5);
+    if (!(await p.evaluate(() => __momoApi.snd.unlocked))) throw new Error('not unlocked after a gesture');
+    step('no sound before a user gesture; the first click unlocks audio');
+    // each mood has its own sound, one per 4 s, never spamming
+    const map = { funny: 'giggle', mindblown: 'whoa', love: 'aww', sleepy: 'yawn', cheering: 'cheer', scared: 'squeak' };
+    for (const [m, snd] of Object.entries(map)) {
+      await p.evaluate((m) => { window.__momoSounds.length = 0; const s = __momoApi.snd; s.last = -1e9; s.busyUntil = 0; __momoApi.react(m, 1); }, m);
+      const got = await p.evaluate(() => window.__momoSounds.slice());
+      if (got.join() !== snd) throw new Error(`${m}: expected ${snd}, got ${got}`);
+    }
+    await p.evaluate(() => { window.__momoSounds.length = 0; const s = __momoApi.snd; s.last = -1e9; s.busyUntil = 0; __momoApi.react('funny', 1); __momoApi.react('love', 1); __momoApi.react('scared', 1); });
+    if ((await p.evaluate(() => window.__momoSounds.length)) !== 1) throw new Error('more than one sound within 4s');
+    step('giggle / whoa / aww / yawn / cheer / squeak per mood; at most one reaction sound per 4 s');
+    // tricks + banana
+    await p.evaluate(() => { window.__momoSounds.length = 0; __momoApi.trick('backflip'); });
+    await p.waitForTimeout(350); await p.evaluate(() => __momoApi.trick('banana'));
+    const tr = await p.evaluate(() => window.__momoSounds.slice());
+    if (tr[0] !== 'boing' || tr[1] !== 'splat') throw new Error('trick sounds ' + tr);
+    await p.waitForTimeout(350); await p.evaluate(() => { window.__momoSounds.length = 0; });
+    await p.evaluate(() => { __momoApi.m.lastTap = Date.now(); document.querySelector('#momo .m-torso'); });
+    await p.locator('#momo .m-torso').click({ force: true }); await p.locator('#momo .m-torso').click({ force: true });
+    await p.waitForFunction(() => window.__momoSounds.includes('swoosh') && window.__momoSounds.includes('splat'), null, { timeout: 4000 });
+    step('boing for tricks, swoosh + splat for the banana');
+    // toggle off: remembered, silent, cancels speech
+    await p.click('.nav-momo-snd');
+    if (await p.evaluate(() => localStorage.getItem('zuzu.momoSound')) !== '0') throw new Error('sound off not saved');
+    await p.evaluate(() => { window.__momoSounds.length = 0; const s = __momoApi.snd; s.last = -1e9; s.busyUntil = 0; __momoApi.react('funny', 1); __momoApi.trick('backflip'); });
+    if ((await p.evaluate(() => window.__momoSounds.length)) !== 0) throw new Error('sound played while off');
+    await p.reload(); await p.waitForSelector('#feed .post');
+    if ((await p.getAttribute('.nav-momo-snd', 'aria-pressed')) !== 'false') throw new Error('sound off not remembered');
+    await p.click('.nav-momo-snd'); // back on
+    step('sound toggle off silences Momo and is remembered across reloads');
+    // hidden Momo never makes sound
+    await p.click('.nav .nav-momo'); await p.waitForFunction(() => document.getElementById('momo').hidden === true, null, { timeout: 4000 });
+    await p.evaluate(() => { window.__momoSounds.length = 0; const s = __momoApi.snd; s.last = -1e9; s.busyUntil = 0; __momoApi.react('funny', 1); __momoApi.trick('dance'); });
+    if ((await p.evaluate(() => window.__momoSounds.length)) !== 0) throw new Error('hidden Momo made a sound');
+    await p.click('.nav .nav-momo'); await p.waitForFunction(() => !document.getElementById('momo').hidden, null, { timeout: 4000 });
+    step('a hidden Momo never plays sounds');
+    // speaker button reads the thought aloud
+    if ((await p.evaluate(() => [__momoApi.lang('Wah yeh toh bahut mast hai yaar'), __momoApi.lang('Nice one!'), __momoApi.lang('बहुत प्यारी बात')].join())) !== 'hi-IN,en-IN,hi-IN') throw new Error('language pick');
+    await p.evaluate(() => { __momoApi.bubble('Wah yeh toh bahut mast hai yaar 🍌', 'thought'); });
+    await p.click('.mb-speak');
+    const sp = await p.evaluate(() => window.__momoSpoken.slice());
+    if (!sp.length || sp[0].lang !== 'hi-IN' || /🍌/.test(sp[0].text)) throw new Error('speaker button ' + JSON.stringify(sp));
+    await p.click('.mb-speak'); // tap again = stop
+    if ((await p.evaluate(() => window.__cancels)) < 1) throw new Error('speech not cancelled');
+    step('speaker button on the thought bubble reads it aloud (hi-IN for Hinglish, emoji stripped) and stops on a second tap');
+    // "Momo talks": default off; opt-in via settings; speech stops when Momo is hidden
+    if (await p.evaluate(() => localStorage.getItem('zuzu.momoTalks')) === '1') throw new Error('talks should default off');
+    await p.goto(B + '/settings'); await p.waitForSelector('#snd-talks');
+    if (await p.isChecked('#snd-talks')) throw new Error('Momo talks should be off by default');
+    await p.check('#snd-talks');
+    if ((await p.evaluate(() => localStorage.getItem('zuzu.momoTalks'))) !== '1') throw new Error('talks not saved');
+    await p.goto(B + '/home'); await p.waitForSelector('#feed .post'); await p.mouse.click(5, 5);
+    await p.evaluate(() => { window.__momoSpoken.length = 0; });
+    await p.mouse.move(600, 450); await p.mouse.wheel(0, 250);
+    await p.waitForFunction(() => window.__momoSpoken.some(x => x.auto), null, { timeout: 20000 });
+    step('"Momo talks" (opt-in in Settings) auto-speaks the thought of the post he sits on');
+    await p.evaluate(() => { __momoApi.snd.talkAt = -1e9; });
+    await p.evaluate(() => { window.__cancels = 0; __momoApi.m.speaking = true; });
+    await p.click('.nav .nav-momo'); await p.waitForFunction(() => window.__cancels > 0, null, { timeout: 4000 });
+    step('speech is cancelled when Momo is hidden');
     await ctx.request.delete(B + '/api/me', { data: { confirm: un } }).catch(() => {});
   } finally { await br.close(); app.child.kill(); }
 }

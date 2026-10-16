@@ -1006,3 +1006,17 @@ body.reels-page .fab{display:none}
 }
 @keyframes momo-wiggle{0%,100%{transform:rotate(0)}25%{transform:rotate(-4deg)}75%{transform:rotate(4deg)}}
 .outfit-card .oc-fig .momo-svg *{animation:none}
+
+/* Momo sound toggle (next to the Momo switch) */
+.nav-momo-snd{font-size:17px}
+.nav-momo-snd .momo-switch,.nav-momo .momo-switch{margin:0 -4px}
+.nav-momo-snd[aria-pressed="true"] .momo-switch{background:var(--blue)}
+.nav-momo-snd[aria-pressed="true"] .momo-switch span{transform:translateX(14px)}
+.nav-momo-snd .snd-ic{font-size:14px;margin-left:2px}
+.momo-stoggle{margin-left:-4px}
+.momo-stoggle[aria-pressed="true"]{opacity:1;filter:none}
+.mb-speak{display:none;position:absolute;top:-12px;right:-10px;width:28px;height:28px;border-radius:50%;border:0;background:#1d9bf0;color:#fff;font-size:14px;line-height:1;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.4);padding:0}
+.momo-bubble.can-speak .mb-speak{display:flex}
+.mb-speak.on{background:#f91880;animation:momo-beat .7s ease-in-out infinite}
+.momo-bubble.zzz .mb-speak{display:none}
+.set-sec .chk{display:flex;gap:8px;align-items:center;margin:8px 0;cursor:pointer}

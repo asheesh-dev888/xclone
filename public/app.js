@@ -534,6 +534,7 @@ document.addEventListener('click', async (e) => {
       if (location.pathname.toLowerCase() === '/u/' + state.me.username.toLowerCase()) viewProfile(state.me.username, 'posts');
     }
     else if (a === 'momo-toggle') momoToggle();
+    else if (a === 'momo-sound') momoSoundToggle();
     else if (a === 'dismiss-app-banner') { store('localStorage', BANNER_KEY, '1'); $('#app-banner')?.remove(); }
   } catch (err) {
     el.classList.remove('pop');
@@ -1839,9 +1840,10 @@ const momo = {
 };
 try { const saved = JSON.parse(sessionStorage.getItem('zuzu.momoThoughts') || '[]'); saved.forEach(([k, v]) => momo.thoughts.set(k, v)); JSON.parse(sessionStorage.getItem('zuzu.momoMoods') || '[]').forEach(([k, v]) => momo.moods.set(k, v)); } catch {}
 const momoReduced = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const momoSoundOn = () => store('localStorage', 'zuzu.momoSound') !== '0';
 const momoToggleHTML = (mobile) => mobile
-  ? `<button class="momo-mtoggle" data-action="momo-toggle" aria-pressed="${momoOn()}" aria-label="Show Momo 🐒" title="Show Momo 🐒">🐒</button>`
-  : `<button class="nav-item nav-momo" data-action="momo-toggle" aria-pressed="${momoOn()}" title="Show Momo 🐒"><span class="momo-switch" aria-hidden="true"><span></span></span><span class="lbl">Show Momo 🐒</span></button>`;
+  ? `<button class="momo-mtoggle" data-action="momo-toggle" aria-pressed="${momoOn()}" aria-label="Show Momo 🐒" title="Show Momo 🐒">🐒</button><button class="momo-mtoggle momo-stoggle" data-action="momo-sound" aria-pressed="${momoSoundOn()}" aria-label="Momo sounds" title="Momo sounds">${momoSoundOn() ? '🔊' : '🔇'}</button>`
+  : `<button class="nav-item nav-momo" data-action="momo-toggle" aria-pressed="${momoOn()}" title="Show Momo 🐒"><span class="momo-switch" aria-hidden="true"><span></span></span><span class="lbl">Show Momo 🐒</span></button><button class="nav-item nav-momo-snd" data-action="momo-sound" aria-pressed="${momoSoundOn()}" title="Momo sounds"><span class="momo-switch" aria-hidden="true"><span></span></span><span class="lbl">Momo sounds <span class="snd-ic">${momoSoundOn() ? '🔊' : '🔇'}</span></span></button>`;
 
 const MOMO_SVG = `<svg class="momo-svg" viewBox="0 0 100 120" aria-hidden="true">
   <ellipse class="m-shadow" cx="50" cy="117" rx="22" ry="3"/>
@@ -1910,6 +1912,7 @@ function momoTrick(name) {
   el.dataset.trick = name;
   const say = { backflip: 'Ta-da! Backflip! 🐒', banana: 'Nom nom nom 🍌', dance: 'Dance break! 💃🐒' }[name];
   momoShowBubble(say, 'tap');
+  momoSfx(name === 'banana' ? 'splat' : 'boing', { user: true });
   if (name === 'banana') momoFx(['🍌']);
   momo.timers.trick = setTimeout(() => { delete el.dataset.trick; }, name === 'dance' ? 2400 : 1300);
 }
@@ -1917,12 +1920,13 @@ function momoTrick(name) {
 function momoBanana() {
   if (!momo.el || !momo.post || !momo.post.isConnected) return momoShowBubble('Throw bananas at a post! 🍌', 'tap');
   window.__momoBananas = (window.__momoBananas || 0) + 1;
+  momoSfx('swoosh', { user: true });
   const b = document.createElement('div'); b.className = 'momo-banana'; b.textContent = '🍌'; b.setAttribute('aria-hidden', 'true');
   const from = { x: momo.x + momo.W / 2, y: momo.y + momo.H * 0.4 };
   const r = momo.post.getBoundingClientRect(), to = { x: r.left + Math.min(r.width * 0.45, 260), y: r.top + Math.min(r.height * 0.5, 80) };
   b.style.left = from.x + 'px'; b.style.top = from.y + 'px';
   document.body.appendChild(b);
-  const done = () => { b.remove(); const splat = document.createElement('div'); splat.className = 'momo-banana splat'; splat.textContent = '💥'; splat.style.left = to.x + 'px'; splat.style.top = to.y + 'px'; document.body.appendChild(splat); setTimeout(() => splat.remove(), 700); momo.post.classList.add('momo-hit'); setTimeout(() => momo.post && momo.post.classList.remove('momo-hit'), 600); };
+  const done = () => { momoSfx('splat', { user: true }); b.remove(); const splat = document.createElement('div'); splat.className = 'momo-banana splat'; splat.textContent = '💥'; splat.style.left = to.x + 'px'; splat.style.top = to.y + 'px'; document.body.appendChild(splat); setTimeout(() => splat.remove(), 700); momo.post.classList.add('momo-hit'); setTimeout(() => momo.post && momo.post.classList.remove('momo-hit'), 600); };
   if (momoReduced() || !b.animate) { setTimeout(done, 200); return momoShowBubble('Banana for you! 🍌', 'tap'); }
   const dx = to.x - from.x, dy = to.y - from.y;
   b.animate([{ transform: 'translate(0,0) rotate(0)' }, { transform: `translate(${dx * 0.5}px,${dy * 0.5 - 60}px) rotate(360deg)` }, { transform: `translate(${dx}px,${dy}px) rotate(720deg)` }], { duration: 650, easing: 'ease-in' }).onfinish = done;
@@ -1935,14 +1939,23 @@ function momoBuild() {
   momo.built = true;
   const el = momo.el = document.createElement('div');
   el.id = 'momo'; el.className = 'momo st-idle'; el.hidden = true;
-  el.innerHTML = `<div class="momo-bubble" hidden><div class="mb-cloud" data-momo="bubble"><i class="pf p1"></i><i class="pf p2"></i><i class="pf p3"></i><i class="pf p4"></i><i class="pf p5"></i><span class="mb-ic" aria-hidden="true">💬</span><span class="mb-text" aria-live="polite"></span></div><i class="mb-dot d1"></i><i class="mb-dot d2"></i><i class="mb-dot d3"></i></div>
+  el.innerHTML = `<div class="momo-bubble" hidden><div class="mb-cloud" data-momo="bubble"><i class="pf p1"></i><i class="pf p2"></i><i class="pf p3"></i><i class="pf p4"></i><i class="pf p5"></i><span class="mb-ic" aria-hidden="true">💬</span><span class="mb-text" aria-live="polite"></span></div><button type="button" class="mb-speak" data-momo="speak" aria-label="Read aloud" title="Read aloud">🔊</button><i class="mb-dot d1"></i><i class="mb-dot d2"></i><i class="mb-dot d3"></i></div>
     <div class="momo-fig" data-momo="monkey" role="button" tabindex="0" aria-label="Momo the monkey. Tap for a thought">${MOMO_SVG}</div>`;
   document.body.appendChild(el);
   momoOutfit(state.prefs && state.prefs.momo_outfit);
   momo.bubble = $('.momo-bubble', el); momo.textEl = $('.mb-text', el);
+  el.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-momo="monkey"]')) e.preventDefault(); });
+  el.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('[data-momo="monkey"]')) return;
+    clearTimeout(momo.timers.press); momo.lp = false;
+    momo.timers.press = setTimeout(() => { if (momoSpeak(false)) { momo.lp = true; momoSetState(momo.st); } }, 600);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => el.addEventListener(t, () => clearTimeout(momo.timers.press)));
   el.addEventListener('click', (e) => {
+    if (momo.lp) { momo.lp = false; e.preventDefault(); e.stopPropagation(); return; } // the long-press already read the thought aloud
     const t = e.target.closest('[data-momo]'); if (!t) return;
     e.preventDefault(); e.stopPropagation();
+    if (t.dataset.momo === 'speak') { if (momo.speaking) momoStopSpeech(); else momoSpeak(false); return; }
     if (t.dataset.momo === 'bubble') momoBubbleTap(); else momoTap();
   });
   el.addEventListener('keydown', (e) => {
@@ -2121,10 +2134,135 @@ async function momoThink(id) {
     momoShowBubble(text, 'thought');
     const mood = momo.moods.get(id);
     if (mood) { momo.el.dataset.mood = mood; window.__momoMoods && window.__momoMoods.push(mood); momoReact(mood, id); }
+    momoAutoTalk();
   }, wait);
 }
-window.__momoApi = { get m() { return momo; }, react: (...a) => momoReact(...a), trick: (...a) => momoTrick(...a), tap: () => momoTap(), bubble: (...a) => momoShowBubble(...a) };
+// ---------- Momo sounds: tiny WebAudio synths (no audio files), unlocked by a user gesture, one sound per 4 s ----------
+const snd = { ctx: null, master: null, unlocked: false, last: -1e9, busyUntil: 0, userAt: -1e9, talkAt: -1e9, cur: null, noise: null };
+const SND_VOL = 0.16; // default "low volume"
+function momoAudioUnlock() {
+  if (snd.unlocked || !momoSoundOn()) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    if (!snd.ctx) { snd.ctx = new AC(); snd.master = snd.ctx.createGain(); snd.master.gain.value = SND_VOL; snd.master.connect(snd.ctx.destination); }
+    snd.ctx.resume && snd.ctx.resume();
+    snd.unlocked = true;
+  } catch {}
+}
+['pointerdown', 'touchend', 'keydown', 'click'].forEach(t => addEventListener(t, momoAudioUnlock, { passive: true, capture: true }));
+function sndNoise() {
+  if (snd.noise) return snd.noise;
+  const c = snd.ctx, b = c.createBuffer(1, c.sampleRate, c.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return (snd.noise = b);
+}
+// One voice: oscillator with a pitch path [[t, hz], …] (seconds from start), optional filter and vibrato, shaped by an attack/decay envelope.
+function sndTone(bus, t0, o) {
+  const c = snd.ctx, osc = c.createOscillator(), g = c.createGain(); let node = osc;
+  osc.type = o.type || 'sine';
+  const path = o.path; osc.frequency.setValueAtTime(path[0][1], t0);
+  for (let i = 1; i < path.length; i++) osc.frequency.exponentialRampToValueAtTime(Math.max(20, path[i][1]), t0 + path[i][0]);
+  if (o.vib) { const l = c.createOscillator(), lg = c.createGain(); l.frequency.value = o.vib[0]; lg.gain.value = o.vib[1]; l.connect(lg); lg.connect(osc.frequency); l.start(t0); l.stop(t0 + o.dur + 0.05); }
+  if (o.lp) { const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; node.connect(f); node = f; }
+  node.connect(g);
+  const a = o.attack || 0.006, v = (o.vol || 0.5);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(v, t0 + a); g.gain.exponentialRampToValueAtTime(0.0001, t0 + o.dur);
+  g.connect(bus); osc.start(t0); osc.stop(t0 + o.dur + 0.05);
+}
+function sndNoiseBurst(bus, t0, o) {
+  const c = snd.ctx, src = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+  src.buffer = sndNoise(); f.type = o.type || 'bandpass'; f.Q.value = o.q || 1;
+  f.frequency.setValueAtTime(o.f[0][1], t0); o.f.slice(1).forEach(([t, hz]) => f.frequency.exponentialRampToValueAtTime(hz, t0 + t));
+  src.connect(f); f.connect(g);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(o.vol || 0.5, t0 + (o.attack || 0.02)); g.gain.exponentialRampToValueAtTime(0.0001, t0 + o.dur);
+  g.connect(bus); src.start(t0); src.stop(t0 + o.dur + 0.05);
+}
+const SND = {
+  giggle: (b, t) => { for (let i = 0; i < 5; i++) sndTone(b, t + i * 0.115, { type: 'square', path: [[0, 640 + 70 * (i % 2)], [0.09, 440 + 40 * (i % 2)]], dur: 0.09, vol: 0.32 - i * 0.02, lp: 1700 }); },
+  whoa: (b, t) => sndTone(b, t, { type: 'sawtooth', path: [[0, 200], [0.28, 520], [0.75, 300]], dur: 0.75, vol: 0.4, lp: 900, vib: [6, 10], attack: 0.04 }),
+  aww: (b, t) => { sndTone(b, t, { path: [[0, 784], [0.5, 780]], dur: 0.55, vol: 0.4 }); sndTone(b, t, { path: [[0, 1568], [0.4, 1560]], dur: 0.4, vol: 0.08 }); sndTone(b, t + 0.2, { path: [[0, 659], [0.6, 655]], dur: 0.65, vol: 0.4 }); },
+  yawn: (b, t) => { sndTone(b, t, { type: 'triangle', path: [[0, 330], [0.45, 300], [1.1, 150]], dur: 1.15, vol: 0.28, lp: 700, attack: 0.3, vib: [4, 5] }); sndNoiseBurst(b, t, { f: [[0, 600], [1.1, 240]], q: 0.8, dur: 1.1, vol: 0.12, attack: 0.35 }); },
+  cheer: (b, t) => { [523, 659, 784, 1047].forEach((f, i) => sndTone(b, t + i * 0.09, { type: 'triangle', path: [[0, f], [0.2, f]], dur: 0.22, vol: 0.35 })); [523, 659, 784, 1047].forEach(f => sndTone(b, t + 0.4, { type: 'square', path: [[0, f], [0.4, f]], dur: 0.45, vol: 0.07, lp: 2400 })); },
+  squeak: (b, t) => { sndTone(b, t, { type: 'triangle', path: [[0, 1500], [0.06, 2700], [0.14, 1900]], dur: 0.15, vol: 0.28, vib: [40, 60] }); sndTone(b, t + 0.2, { type: 'triangle', path: [[0, 1700], [0.06, 3000], [0.12, 2100]], dur: 0.13, vol: 0.22, vib: [40, 60] }); },
+  boing: (b, t) => sndTone(b, t, { path: [[0, 700], [0.08, 260], [0.2, 520], [0.38, 140]], dur: 0.4, vol: 0.45, vib: [22, 40] }),
+  swoosh: (b, t) => sndNoiseBurst(b, t, { f: [[0, 500], [0.22, 3200], [0.45, 700]], q: 1.4, dur: 0.46, vol: 0.4, attack: 0.15 }),
+  splat: (b, t) => { sndNoiseBurst(b, t, { type: 'lowpass', f: [[0, 2200], [0.18, 300]], q: 0.7, dur: 0.2, vol: 0.5, attack: 0.004 }); sndTone(b, t, { path: [[0, 160], [0.14, 50]], dur: 0.16, vol: 0.5 }); },
+  blip: (b, t) => sndTone(b, t, { path: [[0, 880], [0.06, 1320]], dur: 0.08, vol: 0.3 }),
+};
+// Gate: sound is on, Momo is visible (and not hidden / muted), the tab is active and a gesture unlocked audio.
+// Reactions (not user-triggered) also need Momo's post in view and obey one sound per 4 s, never overlapping.
+function momoSfx(name, opts = {}) {
+  if (!SND[name] || !momoSoundOn() || !snd.unlocked || !snd.ctx || document.hidden || !momo.active || !momo.el || momo.el.hidden) return false;
+  const now = performance.now();
+  if (opts.user) { if (now - snd.userAt < 300) return false; snd.userAt = now; }
+  else {
+    if (now - snd.last < 4000 || now < snd.busyUntil) return false;
+    if (momo.post) { const r = momo.post.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight) return false; }
+    if (!opts.free) snd.last = now; // the pop-up blip doesn't use up the reaction budget
+  }
+  try {
+    if (snd.ctx.state === 'suspended') snd.ctx.resume();
+    if (snd.cur) { try { snd.cur.gain.cancelScheduledValues(snd.ctx.currentTime); snd.cur.gain.setTargetAtTime(0, snd.ctx.currentTime, 0.02); } catch {} } // never overlap
+    const bus = snd.ctx.createGain(); bus.gain.value = 1; bus.connect(snd.master); snd.cur = bus;
+    SND[name](bus, snd.ctx.currentTime + 0.01);
+    snd.busyUntil = now + ({ yawn: 1200, whoa: 800, giggle: 700, cheer: 850 }[name] || 500);
+    window.__momoSounds && window.__momoSounds.push(name);
+    return true;
+  } catch { return false; }
+}
+const MOMO_MOOD_SFX = { funny: 'giggle', mindblown: 'whoa', love: 'aww', sleepy: 'yawn', cheering: 'cheer', scared: 'squeak' };
+function momoSoundToggle() {
+  const on = !momoSoundOn();
+  store('localStorage', 'zuzu.momoSound', on ? '1' : '0');
+  $$('[data-action="momo-sound"]').forEach(b => { b.setAttribute('aria-pressed', String(on)); const i = $('.snd-ic', b); if (i) i.textContent = on ? '🔊' : '🔇'; else if (b.classList.contains('momo-stoggle')) b.textContent = on ? '🔊' : '🔇'; });
+  if (on) { momoAudioUnlock(); momoSfx('blip', { user: true }); } else { if (snd.cur) { try { snd.cur.gain.setTargetAtTime(0, snd.ctx.currentTime, 0.02); } catch {} } momoStopSpeech(); }
+  toast(on ? 'Momo sounds on 🔊' : 'Momo sounds off 🔇');
+}
+// Bonus: long-press Momo to hear his thought read aloud (browser speechSynthesis; hi-IN for Hindi / Hinglish).
+const MOMO_HINGLISH = /\b(hai|hain|kya|nahi|nahin|yaar|bhai|accha|achha|bahut|mein|hum|tum|aap|kuch|karo|chalo|kaise|kyun|yeh|woh|toh|bhi|sab|apna|mera|meri|tera|kal|aaj|abhi|bilkul|ekdum|matlab|ab|se|ka|ki|ko|ne|pe|aur|dil|pyaar|maa)\b/gi;
+const momoLangFor = (t) => /[\u0900-\u097F]/.test(t) || (String(t).match(MOMO_HINGLISH) || []).length >= 2 ? 'hi-IN' : 'en-IN';
+const momoTalksOn = () => store('localStorage', 'zuzu.momoTalks') === '1'; // opt-in, default off
+function momoStopSpeech() {
+  clearTimeout(momo.timers.talk);
+  if (momo.speaking) { momo.speaking = false; try { speechSynthesis.cancel(); } catch {} }
+  $$('.mb-speak', momo.el || document).forEach(b => b.classList.remove('on'));
+}
+// explicit = the speaker button / long-press (always allowed); auto = "Momo talks" (needs sound on, a gesture, Momo visible, post in view).
+function momoSpeak(auto) {
+  if (!('speechSynthesis' in window) || !momo.active || !momo.el || momo.el.hidden || document.hidden) return false;
+  if (auto && (!momoTalksOn() || !momoSoundOn() || !snd.unlocked)) return false;
+  const text = String((momo.bubbleKind === 'thought' && momo.textEl && momo.textEl.textContent) || momo.thoughts.get(momo.postId) || '').replace(/\p{Extended_Pictographic}\uFE0F?/gu, '').replace(/\s+/g, ' ').trim();
+  if (!text) return false;
+  if (auto) {
+    const now = performance.now(); if (now - snd.talkAt < 6000) return false;
+    if (momo.post) { const r = momo.post.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight) return false; }
+    snd.talkAt = now;
+  }
+  const lang = momoLangFor(text);
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.lang = lang; u.volume = 0.8; u.rate = 1; u.pitch = 1.3; // a bit higher = playful
+    const voices = speechSynthesis.getVoices() || [];
+    const v = voices.find(x => x.lang === lang) || voices.find(x => x.lang.slice(0, 2) === lang.slice(0, 2));
+    if (v) u.voice = v;
+    momo.speaking = true; $$('.mb-speak', momo.el).forEach(b => b.classList.add('on'));
+    u.onend = u.onerror = () => { momo.speaking = false; $$('.mb-speak', momo.el).forEach(b => b.classList.remove('on')); };
+    speechSynthesis.speak(u);
+    window.__momoSpoken && window.__momoSpoken.push({ text, lang, auto: !!auto });
+    return true;
+  } catch { return false; }
+}
+// "Momo talks": after the mood sound, read the thought aloud (post must still be in view)
+function momoAutoTalk() {
+  if (!momoTalksOn() || !momoSoundOn() || !snd.unlocked) return;
+  clearTimeout(momo.timers.talk);
+  const wait = Math.max(150, snd.busyUntil - performance.now() + 150);
+  momo.timers.talk = setTimeout(() => momoSpeak(true), wait);
+}
+function momoTalksToggle(on) { store('localStorage', 'zuzu.momoTalks', on ? '1' : '0'); if (!on) momoStopSpeech(); else momoAudioUnlock(); }
+window.__momoApi = { get m() { return momo; }, react: (...a) => momoReact(...a), sfx: (...a) => momoSfx(...a), speak: (a) => momoSpeak(a), stop: () => momoStopSpeech(), get snd() { return snd; }, lang: (t) => momoLangFor(t), trick: (...a) => momoTrick(...a), tap: () => momoTap(), bubble: (...a) => momoShowBubble(...a) };
 function momoReact(mood, id) {
+  if (MOMO_MOOD_SFX[mood]) momoSfx(MOMO_MOOD_SFX[mood]);
   const fx = MOMO_FX[mood]; if (fx) momoFx(fx, { cls: 'fx-' + mood });
   const cloud = $('.mb-cloud', momo.bubble); const old = $('.mb-streak', cloud); if (old) old.remove();
   if (mood === 'funny') {
@@ -2141,6 +2279,7 @@ function momoShowBubble(text, kind) {
   const sk = $('.mb-streak', b); if (sk) sk.remove();
   b.classList.toggle('zzz', kind === 'sleep');
   b.classList.toggle('can-ask', kind === 'thought' && !!state.config.ai);
+  b.classList.toggle('can-speak', kind === 'thought' && 'speechSynthesis' in window);
   momo.textEl.textContent = text;
   const cloud = $('.mb-cloud', b);
   if (kind === 'thought' && state.config.ai) { cloud.setAttribute('role', 'button'); cloud.tabIndex = 0; cloud.setAttribute('aria-label', text + '. Ask ZuZu AI about this post'); }
@@ -2152,6 +2291,8 @@ function momoShowBubble(text, kind) {
 }
 function momoHideBubble(now) {
   const b = momo.bubble; if (!b || b.hidden) return;
+  if (momo.speaking && !now && momo.bubbleKind === 'thought') { clearTimeout(momo.timers.bubble); momo.timers.bubble = setTimeout(() => momoHideBubble(), 1500); return; } // let him finish the sentence
+  momoStopSpeech();
   clearTimeout(momo.timers.bubble); clearTimeout(momo.timers.bubbleOut);
   const done = () => { b.hidden = true; b.classList.remove('out'); momo.bubbleKind = ''; delete momo.el.dataset.mood; if (momo.st === 'think') momoSetState('sit'); };
   if (now) return done();
@@ -2213,6 +2354,7 @@ function momoSettle() {
 }
 function momoOnScroll() {
   if (!momo.active) return;
+  if (momo.speaking && momo.post) { const r = momo.post.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight) momoStopSpeech(); }
   momoActivity(true);
   momo.scrolling = true;
   momoLoop();
@@ -2223,6 +2365,7 @@ function momoAllowed() {
     && !document.body.classList.contains('ai-open') && !$('#modal-root').childElementCount;
 }
 function momoActivate() {
+  const wasActive = momo.active;
   momoBuild();
   momo.active = true;
   momo.el.hidden = false;
@@ -2232,6 +2375,7 @@ function momoActivate() {
   if (momo.post && momo.post.isConnected) { const a = momoAnchor(momoRect(momo.post), momo.post); momoPlace(a.x, a.y); momoSetState('sit'); }
   else { momo.post = null; momo.postId = 0; momo.el.dataset.post = ''; const h = momoHomeSpot(); momoPlace(h.x, h.y); momoSetState('idle'); }
   momoObserve();
+  if (!wasActive) setTimeout(() => momoSfx('blip', { free: true }), 120);
   momoSettleSoon(700);
   clearInterval(momo.idleIv);
   momo.idleIv = setInterval(() => { if (momo.active && Date.now() - momo.lastActivity > MOMO_IDLE_MS()) momoSleep(); }, Math.min(5000, MOMO_IDLE_MS() / 3));
@@ -2273,6 +2417,7 @@ function momoToggle() {
   const on = !momoOn();
   store('localStorage', MOMO_KEY, on ? '1' : '0');
   $$('[data-action="momo-toggle"]').forEach(b => b.setAttribute('aria-pressed', String(on)));
+  if (!on) momoStopSpeech();
   momoSync();
   toast(on ? 'Momo is back! 🐒' : 'Momo is taking a break. Turn him back on anytime.');
 }
@@ -2456,6 +2601,9 @@ function viewSettings() {
         <div class="field"><label for="set-ui-lang">App language</label><select id="set-ui-lang" data-pref="ui_lang">${[['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ui_lang || ZUZU_I18N.get()) === k ? ' selected' : ''} data-noi18n>${l}</option>`).join('')}</select></div>
         <div class="field"><label for="set-ai-lang">AI language</label><p class="muted small">ZuZu AI answers and Momo’s thoughts</p><select id="set-ai-lang" data-pref="ai_lang">${[['auto', 'Same as the post'], ['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ai_lang || 'auto') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div></section>
       <section class="set-sec" id="set-outfit"><h2>Momo’s outfit</h2><p class="muted">Unlock outfits for Momo 🐒 by reaching milestones.</p><div class="outfits" id="outfits">${loader()}</div></section>
+      <section class="set-sec" id="set-momo-voice"><h2>Momo’s voice</h2>
+        <label class="chk"><input type="checkbox" id="snd-on" data-momo-pref="sound" ${momoSoundOn() ? 'checked' : ''}> Momo sound effects <span class="muted small">(low volume)</span></label>
+        <label class="chk"><input type="checkbox" id="snd-talks" data-momo-pref="talks" ${momoTalksOn() ? 'checked' : ''}> Momo talks <span class="muted small">reads his thought aloud (hi-IN for Hindi / Hinglish)</span></label></section>
       <section class="set-sec" id="set-push"><h2>Push notifications</h2><p class="muted" id="push-status">Get notified about likes, replies, follows, mentions and messages.</p>
         <button class="btn btn-outline" data-action="push-toggle" id="push-btn" hidden></button></section>
       <section class="set-sec danger-zone" id="set-delete"><h2>Delete account</h2>
@@ -2489,6 +2637,11 @@ document.addEventListener('click', async (e) => {
   } catch (err) { toast(err.message); }
 }, true);
 // ---- Language preferences (saved on the account; the UI language also in localStorage) ----
+document.addEventListener('change', (e) => {
+  const k = e.target.dataset && e.target.dataset.momoPref; if (!k) return;
+  if (k === 'sound') { if (e.target.checked !== momoSoundOn()) momoSoundToggle(); }
+  else if (k === 'talks') momoTalksToggle(e.target.checked);
+});
 document.addEventListener('change', async (e) => {
   const sel = e.target.closest('select[data-pref]'); if (!sel) return;
   const key = sel.dataset.pref;
