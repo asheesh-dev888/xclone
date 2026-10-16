@@ -1334,6 +1334,20 @@ async function batchCTests() {
     ok(['happy', 'sad', 'funny', 'angry', 'thoughtful'].includes(t.mood), 'untagged model output still gets a mood (keyword guess)', JSON.stringify(t));
     const m = require('../monkey');
     ok(m.guessMood('I miss you 😢') === 'sad' && m.guessMood('this is the worst, so angry') === 'angry' && m.guessMood('lol 😂') === 'funny' && m.guessMood('Why do we dream?') === 'thoughtful' && m.guessMood('Sunny day!') === 'happy', 'fallback mood guesses');
+    // ---- new reactions ----
+    for (const mood of ['mindblown', 'love', 'sleepy', 'cheering', 'scared']) {
+      const pp = (await a('POST', '/api/posts', form({ text: 'plain words here MOCK_MOOD_' + mood }))).data.post;
+      const tt = (await b('GET', `/api/monkey/thought/${pp.id}`)).data;
+      ok(tt.source === 'ai' && tt.mood === mood && tt.thought === 'A mood-tagged thought', `Groq label "${mood}" is accepted`, JSON.stringify(tt));
+    }
+    const pz = (await a('POST', '/api/posts', form({ text: 'quiet text MOCK_MOOD_banana' }))).data.post;
+    t = (await b('GET', `/api/monkey/thought/${pz.id}`)).data;
+    ok(m.MOODS.includes(t.mood) && t.mood === 'happy', 'unknown label falls back to a safe existing mood', JSON.stringify(t));
+    ok(m.guessMood('BREAKING: wow') === 'mindblown' && m.guessMood('Congratulations on the promotion!') === 'cheering' && m.guessMood('so much love ❤️') === 'love' && m.guessMood('scary night 😱') === 'scared' && m.guessMood('x'.repeat(700)) === 'sleepy', 'keyword guesses for the new reactions');
+    ok(m.upgradeMood('sad', 'congrats!') === 'sad' && m.upgradeMood('happy', 'Congratulations!') === 'cheering' && m.upgradeMood(null, 'lol 😂') === 'funny', 'cached older moods stay valid (generic ones may be refined)');
+    const pf = (await a('POST', '/api/posts', form({ text: 'Congratulations team, we won!' }))).data.post;
+    // ai fallback path (rate/limit independent): the local line for the guessed mood
+    ok(Object.values(m.MOOD_LINES).every(l => l.length >= 3 && l.every(x => x.length <= 60)), 'each new reaction has short fallback thought lines');
     // ---- outfits ----
     let o = (await c('GET', '/api/momo/outfits')).data;
     ok(o.outfits.map(x => x.key).join() === 'cap,sunglasses,kurta,crown' && o.outfits.every(x => !x.unlocked) && o.selected === null, 'new user: 4 outfits, all locked');
