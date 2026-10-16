@@ -24,6 +24,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     return c;
   };
   const errors = [];
+  if (process.env.UI_ONLY === 'momo') { await momoReactUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'recovery') { await recoveryUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'batchd') { await batchDUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'batchc') { await batchCUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
@@ -203,6 +204,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await batchCUi(errors, step);
   await batchDUi(errors, step);
   await recoveryUi(errors, step);
+  await momoReactUi(errors, step);
   console.log('\n  Settings: language + push');
   await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -1589,6 +1591,84 @@ async function batchCUi(errors, step) {
     for (const u of users) { await u.ctx.request.delete(B + '/api/me', { data: { confirm: u.username } }).catch(() => {}); await u.ctx.close(); }
     await br.close(); app.child.kill(); groq.srv.close(); await cld.close();
   }
+}
+
+async function momoReactUi(errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
+  console.log('\n  Momo reactions v2');
+  const { startApp } = require('./ai-server');
+  const app = await startApp({ port: 4231 });
+  const B = app.url, rnd = Math.floor(Math.random() * 1e6), un = 'mrui' + rnd;
+  const br = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const ctx = await br.newContext({ viewport: { width: 1200, height: 900 } });
+  const p = await ctx.newPage(); p.on('pageerror', e => errors.push(e.message));
+  const rctx = await br.newContext({ viewport: { width: 1200, height: 900 }, reducedMotion: 'reduce' });
+  try {
+    await p.addInitScript(() => { window.__momoTricks = []; });
+    await p.goto(B + '/signup'); await p.waitForSelector('form[data-mode=signup]');
+    await p.fill('input[name=username]', un); await p.fill('input[name=password]', 'secret123');
+    await p.click('form[data-mode=signup] button[type=submit]'); await waitHome(p);
+    const texts = { funny: 'lol that was hilarious 😂', mindblown: 'BREAKING: wow, just announced', love: 'so much love for my family ❤️', sleepy: 'z '.repeat(1) + 'so boring, so tired 😴', cheering: 'Congratulations on the promotion! 🎉', scared: 'that scary nightmare 😱' };
+    const ids = {};
+    for (const [m, t] of Object.entries(texts)) {
+      const r = await ctx.request.post(B + '/api/posts', { multipart: { text: t } }); ids[m] = (await r.json()).post.id;
+    }
+    await p.goto(B + '/home'); await p.waitForSelector('#feed .post'); await p.waitForFunction(() => document.getElementById('momo') && !document.getElementById('momo').hidden, null, { timeout: 10000 });
+    for (const [m, id] of Object.entries(ids)) {
+      const got = await p.evaluate(async (id) => (await (await fetch('/api/monkey/thought/' + id)).json()).mood, id);
+      if (got !== m) throw new Error(`post for ${m} classified as ${got}`);
+    }
+    step('feed posts get funny / mindblown / love / sleepy / cheering / scared moods (server fallback classification)');
+    const cue = { funny: ['.m-laugh', 'inline'], mindblown: ['.m-laugh', 'inline'], love: ['.m-hearts-eyes', 'inline'], sleepy: ['.m-eyes-closed', 'inline'], cheering: ['.m-pom', 'inline'], scared: ['.m-hands-cover', 'inline'] };
+    for (const [m, [sel, disp]] of Object.entries(cue)) {
+      await p.evaluate((m) => { document.getElementById('momo').dataset.mood = m; }, m);
+      const d = await p.evaluate((sel) => getComputedStyle(document.querySelector('#momo ' + sel)).display, sel);
+      if (d !== disp) throw new Error(`${m}: ${sel} display ${d}`);
+      const an = await p.evaluate(() => getComputedStyle(document.querySelector('#momo .momo-fig')).animationName);
+      if (m !== 'mindblown' && m !== 'sleepy' && an === 'none') throw new Error(`${m}: no body animation`);
+    }
+    // outfit still renders with a new mood
+    await p.evaluate(() => { document.getElementById('momo').dataset.outfit = 'crown'; document.getElementById('momo').dataset.mood = 'cheering'; });
+    if ((await p.evaluate(() => getComputedStyle(document.querySelector('#momo .m-crown')).display)) !== 'inline') throw new Error('outfit hidden');
+    await p.evaluate(() => { delete document.getElementById('momo').dataset.outfit; });
+    step('each reaction has its own animation cues (heart eyes, pom-poms, hands over eyes, yawn, ROFL roll…) and outfits still show');
+    // ROFL: floating hahaha bubbles + streak
+    await p.evaluate(() => { localStorage.removeItem('zuzu.momoLaughs'); __momoApi.bubble('Ha!', 'thought'); __momoApi.react('funny', 1); });
+    const fx = await p.evaluate(() => [...document.querySelectorAll('#momo .momo-fx')].map(e => e.textContent));
+    if (!fx.some(t => /hahaha/.test(t))) throw new Error('no hahaha bubbles ' + fx);
+    if (!/laughed 1 time today/.test(await p.textContent('#momo .mb-streak'))) throw new Error('streak text');
+    await p.evaluate(() => { __momoApi.bubble('Ha!', 'thought'); __momoApi.react('funny', 2); });
+    if (!/laughed 2 times today/.test(await p.textContent('#momo .mb-streak'))) throw new Error('streak 2');
+    if (JSON.parse(await p.evaluate(() => localStorage.getItem('zuzu.momoLaughs'))).n !== 2) throw new Error('streak not stored');
+    await p.waitForFunction(() => !document.querySelector('#momo .momo-fx'), null, { timeout: 6000 });
+    step('funny: floating "hahaha 😂" bubbles clean themselves up; "Momo has laughed N times today" kept locally');
+    // tricks + banana
+    await p.evaluate(() => { delete document.getElementById('momo').dataset.mood; });
+    await p.evaluate(() => { __momoApi.trick('backflip'); });
+    if ((await p.getAttribute('#momo', 'data-trick')) !== 'backflip') throw new Error('trick not set');
+    await p.waitForFunction(() => !document.getElementById('momo').dataset.trick, null, { timeout: 4000 });
+    const tricks = new Set(); for (let i = 0; i < 40; i++) tricks.add(await p.evaluate(() => { __momoApi.m.bubbleKind = 'thought'; __momoApi.m.lastTap = 0; const n = window.__momoTricks.length; __momoApi.tap(); return window.__momoTricks.length > n ? window.__momoTricks[n] : 'line'; }));
+    if (!['backflip', 'banana', 'dance'].some(t => tricks.has(t))) throw new Error('tap never did a trick ' + [...tricks]);
+    step('tap: random trick (backflip / banana snack / dance)');
+    await p.evaluate(() => { window.__momoBananas = 0; __momoApi.m.lastTap = 0; });
+    await p.locator('#momo .m-torso').click({ force: true }); await p.locator('#momo .m-torso').click({ force: true });
+    await p.waitForFunction(() => window.__momoBananas === 1 && document.querySelector('.momo-banana'), null, { timeout: 3000 });
+    await p.waitForFunction(() => !document.querySelector('.momo-banana'), null, { timeout: 4000 });
+    step('double-tap: banana flies to the post, splats, and cleans up');
+    // off switch
+    await p.click('.nav .nav-momo');
+    await p.waitForFunction(() => document.getElementById('momo').hidden === true, null, { timeout: 4000 });
+    step('on/off switch still hides Momo');
+    // reduced motion: simple wiggle only, no floating bits
+    const rp = await rctx.newPage(); rp.on('pageerror', e => errors.push(e.message));
+    await rp.goto(B + '/login'); await rp.fill('input[name=username]', un); await rp.fill('input[name=password]', 'secret123'); await rp.click('button[type=submit]'); await rp.waitForURL('**/home');
+    await rp.waitForSelector('#feed .post'); await rp.waitForFunction(() => document.getElementById('momo') && !document.getElementById('momo').hidden, null, { timeout: 10000 });
+    await rp.evaluate(() => { document.getElementById('momo').dataset.mood = 'funny'; __momoApi.react('funny', 3); });
+    const rm = await rp.evaluate(() => ({ an: getComputedStyle(document.querySelector('#momo .momo-fig')).animationName, fx: document.querySelectorAll('#momo .momo-fx').length }));
+    if (rm.an !== 'momo-wiggle' || rm.fx) throw new Error('reduced motion: ' + JSON.stringify(rm));
+    step('prefers-reduced-motion: reactions reduce to a simple wiggle (no flying effects)');
+    await ctx.request.delete(B + '/api/me', { data: { confirm: un } }).catch(() => {});
+  } finally { await br.close(); app.child.kill(); }
 }
 
 async function waitHome(p) {

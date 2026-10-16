@@ -930,3 +930,79 @@ body.reels-page .fab{display:none}
 .rec-ok{display:flex;gap:8px;align-items:center}
 .fp-tabs{margin:8px 0 12px;display:flex}.fp-tabs .tab{flex:1;padding:10px}
 .rec-sent{padding:12px;border-radius:12px;background:rgba(0,186,124,.12)}
+
+/* Momo reactions v2: ROFL, mind-blown, love, sleepy, cheering, scared + tricks, floating effects, banana */
+.m-pom,.m-hearts-eyes,.m-hands-cover{display:none}
+.momo[data-mood="funny"] .m-tear{display:inline;animation:momo-joy .7s ease-in infinite}
+.momo[data-mood="funny"] .m-tear2{animation-delay:.3s}
+.momo[data-mood="funny"] .momo-fig{animation:momo-rofl 3.4s ease-in-out 1}
+.momo[data-mood="funny"] .m-legs{animation:momo-kick .22s ease-in-out infinite alternate;transform-origin:50% 0}
+.momo[data-mood="funny"] .m-arm-l,.momo[data-mood="funny"] .m-arm-r{transform-origin:50% 20%;animation:momo-belly .25s ease-in-out infinite alternate}
+@keyframes momo-rofl{0%{transform:rotate(0) translateY(0)}12%{transform:rotate(-95deg) translate(-6px,10px)}30%{transform:rotate(95deg) translate(8px,12px)}48%{transform:rotate(-95deg) translate(-8px,12px)}66%{transform:rotate(95deg) translate(8px,12px)}80%{transform:rotate(380deg) translate(0,-4px)}100%{transform:rotate(360deg) translateY(0)}}
+@keyframes momo-joy{0%{transform:translate(0,0);opacity:0}15%{opacity:1}100%{transform:translate(4px,14px);opacity:0}}
+@keyframes momo-kick{from{transform:rotate(-10deg)}to{transform:rotate(10deg)}}
+@keyframes momo-belly{from{transform:rotate(-6deg)}to{transform:rotate(6deg)}}
+/* mind-blown */
+.momo[data-mood="mindblown"] .m-eyes{transform:scale(1.7);animation:none}
+.momo[data-mood="mindblown"] .m-mouth{display:none}
+.momo[data-mood="mindblown"] .m-laugh{display:inline;transform:scale(.45,1.25);transform-box:fill-box;transform-origin:50% 30%}
+.momo[data-mood="mindblown"] .m-head{animation:momo-pop-head .6s ease-out 1}
+.momo[data-mood="mindblown"] .m-arm-l{transform-origin:85% 10%;transform:rotate(150deg)}
+.momo[data-mood="mindblown"] .m-arm-r{transform-origin:15% 10%;transform:rotate(-150deg)}
+@keyframes momo-pop-head{0%{transform:scale(1)}30%{transform:scale(1.22,1.28) translateY(-4px)}60%{transform:scale(.96)}100%{transform:scale(1)}}
+/* love: heart eyes, hugging arms, leaning toward the post */
+.momo[data-mood="love"] .m-eyes{display:none}
+.momo[data-mood="love"] .m-hearts-eyes{display:inline;animation:momo-beat .7s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 50%}
+.momo[data-mood="love"] .m-arm-l{transform-origin:85% 10%;transform:rotate(-62deg)}
+.momo[data-mood="love"] .m-arm-r{transform-origin:15% 10%;transform:rotate(62deg)}
+.momo[data-mood="love"] .momo-fig{animation:momo-hug 1.4s ease-in-out infinite alternate}
+@keyframes momo-beat{0%,100%{transform:scale(1)}50%{transform:scale(1.25)}}
+@keyframes momo-hug{from{transform:rotate(0)}to{transform:rotate(-6deg) translate(-3px,2px) scale(1.04)}}
+/* sleepy: yawn, droop, nap */
+.momo[data-mood="sleepy"] .m-eyes{display:none}.momo[data-mood="sleepy"] .m-eyes-closed{display:inline}
+.momo[data-mood="sleepy"] .m-mouth{display:none}
+.momo[data-mood="sleepy"] .m-laugh{display:inline;animation:momo-yawn 2.2s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 0}
+.momo[data-mood="sleepy"] .m-head{transform:rotate(12deg) translateY(3px);animation:momo-nod 2.4s ease-in-out infinite}
+@keyframes momo-yawn{0%,100%{transform:scale(.4,.3)}40%,60%{transform:scale(.9,1.5)}}
+@keyframes momo-nod{0%,100%{transform:rotate(10deg) translateY(2px)}50%{transform:rotate(16deg) translateY(5px)}}
+/* cheering: arms up with pom-poms, jumping */
+.momo[data-mood="cheering"] .m-pom{display:inline}
+.momo[data-mood="cheering"] .m-arm-l{transform-origin:85% 10%;animation:momo-pomL .32s ease-in-out infinite alternate}
+.momo[data-mood="cheering"] .m-arm-r{transform-origin:15% 10%;animation:momo-pomR .32s ease-in-out -.16s infinite alternate}
+.momo[data-mood="cheering"] .momo-fig{animation:momo-cheer .5s ease-in-out infinite}
+.momo[data-mood="cheering"] .m-mouth{display:none}.momo[data-mood="cheering"] .m-laugh{display:inline}
+@keyframes momo-pomL{from{transform:rotate(140deg)}to{transform:rotate(165deg)}}
+@keyframes momo-pomR{from{transform:rotate(-140deg)}to{transform:rotate(-165deg)}}
+@keyframes momo-cheer{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+/* scared: shivering, hiding behind his hands */
+.momo[data-mood="scared"] .m-hands-cover{display:inline}
+.momo[data-mood="scared"] .m-eyes{display:none}
+.momo[data-mood="scared"] .momo-fig{animation:momo-shiver .12s linear infinite}
+.momo[data-mood="scared"] .m-head{transform:translateY(2px) scale(.96)}
+@keyframes momo-shiver{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+/* tricks (tap) */
+.momo[data-trick="backflip"] .momo-fig{animation:momo-flip .9s ease-in-out 1}
+.momo[data-trick="dance"] .momo-fig{animation:momo-boogie .6s ease-in-out 4}
+.momo[data-trick="banana"] .m-head{animation:momo-nom .3s ease-in-out 4}
+@keyframes momo-flip{0%{transform:translateY(0) rotate(0)}50%{transform:translateY(-34px) rotate(-180deg)}100%{transform:translateY(0) rotate(-360deg)}}
+@keyframes momo-boogie{0%,100%{transform:rotate(-8deg) translateY(0)}25%{transform:rotate(0) translateY(-8px)}50%{transform:rotate(8deg) translateY(0)}75%{transform:rotate(0) translateY(-8px)}}
+@keyframes momo-nom{0%,100%{transform:translateY(0)}50%{transform:translateY(3px) rotate(3deg)}}
+/* floating effects + banana + streak */
+.momo-fx{position:absolute;left:50%;top:10%;z-index:2;pointer-events:none;font-size:15px;font-weight:800;white-space:nowrap;opacity:0;color:var(--text,#e7e9ea);text-shadow:0 1px 3px rgba(0,0,0,.6);animation:momo-float 1.9s ease-out var(--fx-d,0ms) 1 forwards;margin-left:var(--fx-x,0)}
+.momo-fx.fx-funny{font-size:14px;color:#ffd400}
+@keyframes momo-float{0%{transform:translate(-50%,0) scale(.6);opacity:0}15%{opacity:1}100%{transform:translate(-50%,-70px) scale(1.15);opacity:0}}
+.momo-banana{position:fixed;z-index:60;font-size:26px;pointer-events:none;margin:-14px 0 0 -14px}
+.momo-banana.splat{animation:momo-splat .6s ease-out forwards}
+@keyframes momo-splat{from{transform:scale(.4);opacity:1}to{transform:scale(1.6);opacity:0}}
+.momo-hit{animation:momo-bump .5s ease-out}
+@keyframes momo-bump{0%,100%{transform:none}30%{transform:translateX(-3px)}60%{transform:translateX(3px)}}
+.mb-streak{display:block;margin-top:4px;font-size:11px;opacity:.75;font-weight:600}
+/* reduced motion: every reaction collapses to a simple wiggle, no flying bits */
+@media (prefers-reduced-motion: reduce){
+  .momo[data-mood] .momo-fig,.momo[data-trick] .momo-fig{animation:momo-wiggle .8s ease-in-out 2!important}
+  .momo[data-mood] .m-legs,.momo[data-mood] .m-arm-l,.momo[data-mood] .m-arm-r,.momo[data-mood] .m-head,.momo[data-trick] .m-head{animation:none!important}
+  .momo-fx,.momo-hit{display:none;animation:none}
+  .momo-banana{animation:none}
+}
+@keyframes momo-wiggle{0%,100%{transform:rotate(0)}25%{transform:rotate(-4deg)}75%{transform:rotate(4deg)}}
+.outfit-card .oc-fig .momo-svg *{animation:none}

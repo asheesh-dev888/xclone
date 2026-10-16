@@ -1854,8 +1854,8 @@ const MOMO_SVG = `<svg class="momo-svg" viewBox="0 0 100 120" aria-hidden="true"
     <ellipse cx="50" cy="79" rx="21" ry="18.5" fill="#8b5a2b"/>
     <ellipse cx="50" cy="83" rx="13" ry="12.5" fill="#e9c49a"/>
     <g class="m-outfit m-kurta"><path d="M30 76Q30 61 50 60.5Q70 61 70 76L68 95Q50 99 32 95Z" fill="#ff9933"/><path d="M45 61L50 72L55 61" fill="none" stroke="#fff3e0" stroke-width="2"/><path d="M50 72V92" stroke="#e07b10" stroke-width="1.4"/><circle cx="50" cy="77" r="1.3" fill="#fff3e0"/><circle cx="50" cy="83" r="1.3" fill="#fff3e0"/><path d="M32 93Q50 97 68 93" stroke="#138808" stroke-width="2.2" fill="none"/></g>
-    <g class="m-arm-l"><path d="M32 71Q25 84 34 93" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="35" cy="94" r="4.2" fill="#e9c49a"/></g>
-    <g class="m-arm-r"><path d="M68 71Q75 84 66 93" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="65" cy="94" r="4.2" fill="#e9c49a"/></g>
+    <g class="m-arm-l"><path d="M32 71Q25 84 34 93" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="35" cy="94" r="4.2" fill="#e9c49a"/><g class="m-pom"><circle cx="35" cy="97" r="8" fill="#ff4d8d"/><circle cx="31" cy="101" r="4" fill="#ff86b3"/><circle cx="40" cy="102" r="4" fill="#ff86b3"/></g></g>
+    <g class="m-arm-r"><path d="M68 71Q75 84 66 93" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="65" cy="94" r="4.2" fill="#e9c49a"/><g class="m-pom"><circle cx="65" cy="97" r="8" fill="#ffd400"/><circle cx="61" cy="101" r="4" fill="#ffe766"/><circle cx="70" cy="102" r="4" fill="#ffe766"/></g></g>
   </g>
   <g class="m-head">
     <circle cx="25" cy="40" r="9.5" fill="#8b5a2b"/><circle cx="25" cy="40" r="5.2" fill="#e9c49a"/>
@@ -1870,7 +1870,9 @@ const MOMO_SVG = `<svg class="momo-svg" viewBox="0 0 100 120" aria-hidden="true"
     <path class="m-mouth" d="M44 50.5Q50 55.8 56 50.5" stroke="#5a3415" stroke-width="1.9" fill="none" stroke-linecap="round"/>
     <path class="m-laugh" d="M43 50Q50 59 57 50Z" fill="#5a3415"/>
     <path class="m-brows" d="M37.5 31.5L46.5 34.5M62.5 31.5L53.5 34.5" stroke="#2b1a0e" stroke-width="2.2" stroke-linecap="round"/>
-    <ellipse class="m-tear" cx="59.5" cy="45" rx="1.9" ry="2.7" fill="#7cc7ff"/>
+    <ellipse class="m-tear" cx="59.5" cy="45" rx="1.9" ry="2.7" fill="#7cc7ff"/><ellipse class="m-tear m-tear2" cx="40.5" cy="45" rx="1.9" ry="2.7" fill="#7cc7ff"/>
+    <g class="m-hearts-eyes"><path d="M43 43C37 39 39 35 43 37.5C47 35 49 39 43 43Z" fill="#ff3b6b"/><path d="M57 43C51 39 53 35 57 37.5C61 35 63 39 57 43Z" fill="#ff3b6b"/></g>
+    <g class="m-hands-cover"><ellipse cx="42" cy="39" rx="8.5" ry="6.5" fill="#e9c49a" stroke="#8b5a2b" stroke-width="1.6"/><ellipse cx="58" cy="39" rx="8.5" ry="6.5" fill="#e9c49a" stroke="#8b5a2b" stroke-width="1.6"/></g>
     <g class="m-outfit m-shades"><rect x="35.5" y="33" width="13" height="10" rx="4" fill="#111"/><rect x="51.5" y="33" width="13" height="10" rx="4" fill="#111"/><path d="M48.5 36.5h3M35.5 36L27 35M64.5 36L73 35" stroke="#111" stroke-width="1.8"/><path d="M38 35.5l4 0" stroke="#fff" stroke-width="1.2" opacity=".6" stroke-linecap="round"/></g>
     <g class="m-outfit m-cap"><path d="M26.5 30Q27 11 50 11Q73 11 73.5 30Q50 24 26.5 30Z" fill="#1d9bf0"/><path d="M50 26.5Q66 24 82 29Q80 33 70 31.5Q60 29.5 50 30Z" fill="#0f6fb3"/><circle cx="50" cy="11.5" r="2.4" fill="#0f6fb3"/></g>
     <g class="m-outfit m-crown"><path d="M33 20L35 5L43 13L50 2L57 13L65 5L67 20Z" fill="#ffd400" stroke="#d4a500" stroke-width="1.2" stroke-linejoin="round"/><circle cx="50" cy="13" r="2.2" fill="#f91880"/><circle cx="40" cy="16" r="1.5" fill="#1d9bf0"/><circle cx="60" cy="16" r="1.5" fill="#00ba7c"/></g>
@@ -1878,7 +1880,54 @@ const MOMO_SVG = `<svg class="momo-svg" viewBox="0 0 100 120" aria-hidden="true"
   <g class="m-arm-think"><path d="M68 73Q80 62 61 57.5" fill="none" stroke="#8b5a2b" stroke-width="6.5" stroke-linecap="round"/><circle cx="58.5" cy="57.5" r="4.6" fill="#e9c49a"/></g>
 </svg>`;
 
-const MOMO_MOODS = ['happy', 'sad', 'funny', 'angry', 'thoughtful'];
+const MOMO_MOODS = ['happy', 'sad', 'funny', 'angry', 'thoughtful', 'mindblown', 'love', 'sleepy', 'cheering', 'scared'];
+// Floating effects per mood (cheap: a few absolutely-positioned spans that remove themselves).
+const MOMO_FX = {
+  funny: ['hahaha 😂', 'HAHA 😂', 'hehe 🤣', 'hahaha 😂'], love: ['❤️', '💕', '❤️', '💖', '❤️'], mindblown: ['💥', '✨', '🤯', '✨'],
+  sleepy: ['z', 'Z', 'z', 'Z'], cheering: ['🎉', '⭐', '🎊', '⭐'], scared: ['😱', '💦', '😨'],
+};
+const MOMO_TRICKS = ['backflip', 'banana', 'dance'];
+const momoDay = () => new Date().toLocaleDateString('en-CA');
+function momoLaughs() { try { const o = JSON.parse(localStorage.getItem('zuzu.momoLaughs') || 'null'); return o && o.d === momoDay() ? o.n : 0; } catch { return 0; } }
+function momoLaughed() { const n = momoLaughs() + 1; try { localStorage.setItem('zuzu.momoLaughs', JSON.stringify({ d: momoDay(), n })); } catch {} return n; }
+function momoFx(list, opts = {}) {
+  if (!momo.el || momoReduced()) return;
+  const live = $$('.momo-fx', momo.el); if (live.length > 8) return;
+  list.slice(0, 5).forEach((txt, i) => {
+    const e = document.createElement('span');
+    e.className = 'momo-fx' + (opts.cls ? ' ' + opts.cls : ''); e.textContent = txt; e.setAttribute('aria-hidden', 'true');
+    e.style.setProperty('--fx-x', ((i - (list.length - 1) / 2) * 22 + (Math.random() * 10 - 5)).toFixed(0) + 'px');
+    e.style.setProperty('--fx-d', (i * 280) + 'ms');
+    e.addEventListener('animationend', () => e.remove());
+    momo.el.appendChild(e);
+  });
+}
+function momoTrick(name) {
+  const el = momo.el; if (!el) return;
+  name = name || MOMO_TRICKS[Math.floor(Math.random() * MOMO_TRICKS.length)];
+  window.__momoTricks && window.__momoTricks.push(name);
+  clearTimeout(momo.timers.trick);
+  el.dataset.trick = name;
+  const say = { backflip: 'Ta-da! Backflip! 🐒', banana: 'Nom nom nom 🍌', dance: 'Dance break! 💃🐒' }[name];
+  momoShowBubble(say, 'tap');
+  if (name === 'banana') momoFx(['🍌']);
+  momo.timers.trick = setTimeout(() => { delete el.dataset.trick; }, name === 'dance' ? 2400 : 1300);
+}
+// Double-tap easter egg: a banana flies from Momo to the post he is sitting on.
+function momoBanana() {
+  if (!momo.el || !momo.post || !momo.post.isConnected) return momoShowBubble('Throw bananas at a post! 🍌', 'tap');
+  window.__momoBananas = (window.__momoBananas || 0) + 1;
+  const b = document.createElement('div'); b.className = 'momo-banana'; b.textContent = '🍌'; b.setAttribute('aria-hidden', 'true');
+  const from = { x: momo.x + momo.W / 2, y: momo.y + momo.H * 0.4 };
+  const r = momo.post.getBoundingClientRect(), to = { x: r.left + Math.min(r.width * 0.45, 260), y: r.top + Math.min(r.height * 0.5, 80) };
+  b.style.left = from.x + 'px'; b.style.top = from.y + 'px';
+  document.body.appendChild(b);
+  const done = () => { b.remove(); const splat = document.createElement('div'); splat.className = 'momo-banana splat'; splat.textContent = '💥'; splat.style.left = to.x + 'px'; splat.style.top = to.y + 'px'; document.body.appendChild(splat); setTimeout(() => splat.remove(), 700); momo.post.classList.add('momo-hit'); setTimeout(() => momo.post && momo.post.classList.remove('momo-hit'), 600); };
+  if (momoReduced() || !b.animate) { setTimeout(done, 200); return momoShowBubble('Banana for you! 🍌', 'tap'); }
+  const dx = to.x - from.x, dy = to.y - from.y;
+  b.animate([{ transform: 'translate(0,0) rotate(0)' }, { transform: `translate(${dx * 0.5}px,${dy * 0.5 - 60}px) rotate(360deg)` }, { transform: `translate(${dx}px,${dy}px) rotate(720deg)` }], { duration: 650, easing: 'ease-in' }).onfinish = done;
+  momoShowBubble('Banana incoming! 🍌', 'tap');
+}
 // Outfit unlocked by milestones (Settings → Momo's outfit); shown on the web Momo via #momo[data-outfit].
 function momoOutfit(key) { if (momo.el) { if (key) momo.el.dataset.outfit = key; else delete momo.el.dataset.outfit; } }
 function momoBuild() {
@@ -2071,14 +2120,25 @@ async function momoThink(id) {
     momo.shownAt.set(id, Date.now());
     momoShowBubble(text, 'thought');
     const mood = momo.moods.get(id);
-    if (mood) { momo.el.dataset.mood = mood; window.__momoMoods && window.__momoMoods.push(mood); }
+    if (mood) { momo.el.dataset.mood = mood; window.__momoMoods && window.__momoMoods.push(mood); momoReact(mood, id); }
   }, wait);
+}
+window.__momoApi = { get m() { return momo; }, react: (...a) => momoReact(...a), trick: (...a) => momoTrick(...a), tap: () => momoTap(), bubble: (...a) => momoShowBubble(...a) };
+function momoReact(mood, id) {
+  const fx = MOMO_FX[mood]; if (fx) momoFx(fx, { cls: 'fx-' + mood });
+  const cloud = $('.mb-cloud', momo.bubble); const old = $('.mb-streak', cloud); if (old) old.remove();
+  if (mood === 'funny') {
+    const n = momoLaughed();
+    const e = document.createElement('small'); e.className = 'mb-streak'; e.textContent = `😂 Momo has laughed ${n} time${n === 1 ? '' : 's'} today`;
+    cloud.appendChild(e);
+  }
 }
 function momoShowBubble(text, kind) {
   const b = momo.bubble;
   clearTimeout(momo.timers.bubble); clearTimeout(momo.timers.bubbleOut);
   momo.bubbleKind = kind;
   b.classList.remove('out', 'side');
+  const sk = $('.mb-streak', b); if (sk) sk.remove();
   b.classList.toggle('zzz', kind === 'sleep');
   b.classList.toggle('can-ask', kind === 'thought' && !!state.config.ai);
   momo.textEl.textContent = text;
@@ -2101,12 +2161,15 @@ function momoHideBubble(now) {
 function momoTap() {
   momoActivity(true);
   if (!momo.active) return;
+  const now = Date.now(), dbl = now - (momo.lastTap || 0) < 380; momo.lastTap = now;
+  if (dbl && momo.st !== 'sleep') { momo.lastTap = 0; return momoBanana(); }
   if (momo.st === 'sleep') return momoWake();
   if (!momo.post || momo.flight) return momoShowBubble(momo.post ? 'Wheee! 🐒' : 'Scroll and I’ll hop onto a post! 🐒', 'tap');
   const id = momo.postId;
-  if (momo.bubbleKind === 'thought') { // thought already showing: a new (playful) one
+  if (momo.bubbleKind === 'thought') { // thought already showing: a random trick (or a playful line)
     const cur = momo.textEl.textContent;
     const pick = MOMO_TAP.filter(t => t !== cur && (state.config.ai || !/ZuZu AI/.test(t)));
+    if (Math.random() < 0.7) return momoTrick();
     momoShowBubble(pick[Math.floor(Math.random() * pick.length)], 'tap');
   } else { momo.shownAt.delete(id); momoThink(id); } // show the thought again
 }
