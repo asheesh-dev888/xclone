@@ -17,6 +17,7 @@ const push = require('./push');
 const batchd = require('./batchd');
 const recovery = require('./recovery');
 const mail = require('./mail');
+const probes = require('./probes');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -222,7 +223,7 @@ app.get('/media/:id', h(async (req, res) => {
 // ---------- posts ----------
 // Base select for a post with author + counts + viewer state.
 const POST_SELECT = `
-SELECT p.id, p.text, p.image, p.parent_id, p.created_at, p.user_id, p.challenge_day,
+SELECT p.id, p.text, p.image, p.parent_id, p.created_at, p.user_id, p.challenge_day, ${probes.PROBE_COLS},
   u.username, u.name, u.avatar, u.ideal_name, u.ideal_preset_id, u.ideal_qualities,
   (SELECT COUNT(*)::int FROM likes l WHERE l.post_id=p.id) like_count,
   (SELECT COUNT(*)::int FROM posts r WHERE r.parent_id=p.id) reply_count,
@@ -250,6 +251,9 @@ function postOut(r) {
   p.poll = pollOut(poll_raw);
   p.challenge = p.challenge_day ? { day: p.challenge_day, prompt: batchd.promptFor(p.challenge_day) } : null;
   delete p.challenge_day;
+  p.evidence = Array.isArray(p.evidence) ? p.evidence : [];
+  p.resolve_by = p.resolve_by == null ? null : Number(p.resolve_by);
+  p.resolved_at = p.resolved_at == null ? null : Number(p.resolved_at);
   const i = ideals.idealOut({ ideal_name, ideal_preset_id, ideal_qualities });
   p.ideal = i ? { name: i.name, primary: i.primary, color: i.color } : null;
   return p;
@@ -330,6 +334,9 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
   let challenge = null;
   try { challenge = batchd.challengeDay(req.body, { parentId }); } catch (e) { return res.status(e.status).json({ error: e.message }); }
   if (challenge && !text) return res.status(400).json({ error: 'Write your thought to answer the daily challenge' });
+  let probe;
+  try { probe = probes.parseProbe(req.body, { parentId, now }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  if (probe.kind !== 'normal' && !text) return res.status(400).json({ error: 'Write your ' + probe.kind.replace('_', ' ') + ' first' });
   let parent = null;
   if (parentId) {
     parent = await db.get('SELECT * FROM posts WHERE id=$1 AND repost_of IS NULL', [parentId]);
@@ -345,7 +352,7 @@ app.post('/api/posts', auth, upload.single('image'), h(async (req, res) => {
   let id; const pushQ = [];
   try {
     id = await db.tx(async (c) => {
-      const { id } = await db.get('INSERT INTO posts(user_id,text,parent_id,created_at,challenge_day) VALUES ($1,$2,$3,$4,$5) RETURNING id', [req.user.id, text, parentId, now(), challenge], c);
+      const { id } = await db.get('INSERT INTO posts(user_id,text,parent_id,created_at,challenge_day,kind,evidence,resolve_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id', [req.user.id, text, parentId, now(), challenge, probe.kind, probe.evidence && JSON.stringify(probe.evidence), probe.resolveBy], c);
       if (req.file) {
         const url = await saveMedia(c, req.file, req.user.id, id);
         await db.run('UPDATE posts SET image=$1 WHERE id=$2', [url, id], c);
@@ -449,10 +456,11 @@ const PROFILE_SELECT = `SELECT u.*,
   (SELECT COUNT(*)::int FROM follows f WHERE f.followee_id=u.id) followers,
   (SELECT COUNT(*)::int FROM follows f WHERE f.follower_id=u.id) following,
   (SELECT COUNT(*)::int FROM posts p WHERE p.user_id=u.id AND p.repost_of IS NULL) posts,
+  ${probes.CALIB_COLS},
   EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=@me AND f.followee_id=u.id) is_following,
   EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=u.id AND f.followee_id=@me) follows_you
 FROM users u`;
-const toProfile = (r) => ({ ...publicUser(r), followers: r.followers, following: r.following, posts: r.posts, is_following: r.is_following, follows_you: r.follows_you });
+const toProfile = (r) => ({ ...publicUser(r), followers: r.followers, following: r.following, posts: r.posts, is_following: r.is_following, follows_you: r.follows_you, calibration: probes.calibrationOut(r.pred_resolved, r.pred_held) });
 const profileById = async (id, me) => toProfile(await db.get(PROFILE_SELECT + ' WHERE u.id=@id', { id, me: me || 0 }));
 
 app.get('/api/users/:username', h(async (req, res) => {
@@ -751,6 +759,7 @@ push.register(app, { auth, h, db });
 recovery.register(app, { auth, h, db, startSession, publicUser, findUser });
 
 // ---------- Daily thought challenge, ideal circles, stories ----------
+probes.register(app, { auth, h, db, postIdParam, now, getPost });
 batchd.register(app, { auth, h, db, hydrate, getPosts, saveMedia, upload, now });
 
 // ---------- Account deletion + reports ----------

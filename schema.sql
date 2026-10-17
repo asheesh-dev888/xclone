@@ -284,3 +284,17 @@ CREATE INDEX IF NOT EXISTS auth_attempts_key ON auth_attempts(key, at);
 
 -- Demo account display name (only if still the previous default; never overwrites later edits).
 UPDATE users SET name = 'naadbro😊' WHERE username = 'zuzu_builder' AND name = 'ZuZu Builder';
+
+-- Probes: post kinds (claim / prediction / question / thought experiment / challenge), evidence links, prediction outcomes.
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'normal';
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS evidence JSONB;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS resolve_by BIGINT;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS outcome TEXT;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS resolved_at BIGINT;
+CREATE INDEX IF NOT EXISTS posts_pred ON posts(user_id) WHERE kind='prediction';
+-- AI librarian: cached "Connections" for a post (JSON-validated links to other posts).
+CREATE TABLE IF NOT EXISTS post_connections(
+  post_id INTEGER PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  links JSONB NOT NULL,
+  model TEXT,
+  created_at BIGINT NOT NULL);

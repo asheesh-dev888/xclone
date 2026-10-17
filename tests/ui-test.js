@@ -24,6 +24,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
     return c;
   };
   const errors = [];
+  if (process.env.UI_ONLY === 'probes') { await probesUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'sound') { await momoSoundUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'momo') { await momoReactUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'recovery') { await recoveryUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
@@ -207,6 +208,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await recoveryUi(errors, step);
   await momoReactUi(errors, step);
   await momoSoundUi(errors, step);
+  await probesUi(errors, step);
   console.log('\n  Settings: language + push');
   await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -1673,6 +1675,58 @@ async function momoReactUi(errors, step) {
   } finally { await br.close(); app.child.kill(); }
 }
 
+async function probesUi(errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
+  console.log('\n  Probes: kinds, evidence, predictions, calibration, connections');
+  const { startMockGroq, startApp } = require('./ai-server');
+  const mock = await startMockGroq();
+  const app = await startApp({ port: 4233, ai: { baseUrl: mock.url } });
+  const B = app.url, un = 'pbui' + Math.floor(Math.random() * 1e6);
+  const br = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const ctx = await br.newContext({ viewport: { width: 1200, height: 900 } });
+  const p = await ctx.newPage(); p.on('pageerror', e => errors.push(e.message)); p.on('dialog', d => d.accept());
+  try {
+    await p.goto(B + '/signup'); await p.waitForSelector('form[data-mode=signup]');
+    await p.fill('input[name=username]', un); await p.fill('input[name=password]', 'secret123');
+    await p.click('form[data-mode=signup] button[type=submit]'); await waitHome(p);
+    await ctx.request.post(B + '/api/posts', { multipart: { text: 'Remote work raises output for focused teams', kind: 'claim' } });
+    const f = p.locator('form.composer').first();
+    if (await f.locator('.probe-edit').isVisible()) throw new Error('probe options should be hidden until the kind button is used');
+    await f.locator('.tool-probe').click();
+    await f.locator('.pk-sel').selectOption('prediction');
+    if (!(await f.locator('.pk-more').isVisible()) || !(await f.locator('.pk-date').isVisible())) throw new Error('evidence + date not shown for predictions');
+    await f.locator('textarea').fill('Bitcoin will end 2027 above 150k');
+    await f.locator('.pk-ev').first().fill('https://example.com/forecast');
+    await f.locator('.pk-date').fill('2027-12-31');
+    await f.locator('button[type=submit]').click();
+    await p.waitForSelector('#feed .post .probe-chip.pk-prediction');
+    step('composer: kind selector, evidence link and resolve-by date create a prediction with a badge');
+    const post = p.locator('#feed .post', { has: p.locator('.pk-prediction') }).first();
+    if (!(await post.locator('.pk-link').first().getAttribute('href')).startsWith('https://example.com/')) throw new Error('evidence link missing');
+    if (!/Resolve by .*2027/.test(await post.locator('.pk-by-chip').innerText())) throw new Error('resolve-by chip missing: ' + await post.locator('.pk-by-chip').innerText());
+    step('post shows the evidence link and the resolve-by date');
+    if (await f.locator('.pk-sel').inputValue() !== 'normal') throw new Error('composer kind not reset after posting');
+    // librarian
+    await post.locator('[data-action=probe-connections]').click();
+    await p.waitForSelector('.conn-box:not([hidden]) .conn-item', { timeout: 10000 });
+    const rel = await p.locator('.conn-box:not([hidden]) .conn-rel').first().innerText();
+    if (!/Supports|Contradicts|Similar|Testable/.test(rel)) throw new Error('bad connection chip: ' + rel);
+    if (!(await p.locator('.conn-box:not([hidden]) .conn-note').innerText()).includes('AI')) throw new Error('AI note missing');
+    step('Connections button shows validated librarian links');
+    // resolve
+    await post.locator('[data-action=probe-resolve][data-outcome=true]').click();
+    await p.waitForSelector('#feed .post .pk-out.yes');
+    if (await post.locator('[data-action=probe-resolve]').count()) throw new Error('resolve buttons should disappear');
+    step('author marks the prediction as came true');
+    await p.goto(B + '/u/' + un); await p.waitForSelector('.counts .calib');
+    const cal = await p.locator('.counts .calib').innerText();
+    if (!/100%/.test(cal) || !/1 resolved/.test(cal) || !/new/i.test(cal)) throw new Error('calibration text: ' + cal);
+    step('profile shows calibration beside the counts: ' + cal.replace(/\s+/g, ' '));
+    await p.goto(B + '/settings'); await p.waitForSelector('#set-about');
+    if (!(await p.locator('#set-about').innerText()).includes('Optimize for connection, not engagement')) throw new Error('about note missing');
+    step('settings About note carries the motto');
+  } finally { await br.close(); app.child.kill(); mock.srv.close(); }
+}
 async function momoSoundUi(errors, step) {
   if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
   console.log('\n  Momo sounds + voice');

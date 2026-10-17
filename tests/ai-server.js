@@ -39,7 +39,14 @@ function startMockGroq({ chunkDelay = 15 } = {}) {
       if (/MOCK_HANG/.test(last)) return; // never answer (timeout test)
       if (!j.stream) { // non-streaming completion (Momo the monkey's thoughts)
         let content;
-        if (/MOCK_LONG/.test(last)) content = '"Momo: Oh wow, this is such a wonderfully long and winding post that I simply cannot stop thinking about it all day 🍌🎉🐒 truly"';
+        if (/CONNECTIONS_TASK/.test(last)) { // librarian: link the first candidates; MOCK_CONN_BAD -> not JSON; MOCK_CONN_JUNK -> invalid ids / relations
+          let d = {}; try { d = JSON.parse(last.split('\n')[2]); } catch {}
+          const c = (d.candidates || []).map(x => x.id);
+          const pt = (d.post && d.post.text) || '';
+          if (/MOCK_CONN_BAD/.test(pt)) content = 'sorry no json here';
+          else if (/MOCK_CONN_JUNK/.test(pt)) content = JSON.stringify({ links: [{ id: 999999999, relation: 'supports', reason: 'bogus id' }, { id: c[0], relation: 'loves', reason: 'bad relation' }, { id: c[0], relation: 'similar', reason: '' }, { id: c[1], relation: 'Similar to', reason: 'Valid one' }, { relation: 'testable', reason: 'Check it next month' }, { id: c[0], relation: 'supports', reason: 'a' }, { id: c[2], relation: 'contradicts', reason: 'b' }] });
+          else content = JSON.stringify({ links: [{ id: c[0], relation: 'supports', reason: 'Mock: gives a reason' }, { id: c[1], relation: 'contradicts', reason: 'Mock: disagrees' }].filter(l => l.id) });
+        } else if (/MOCK_LONG/.test(last)) content = '"Momo: Oh wow, this is such a wonderfully long and winding post that I simply cannot stop thinking about it all day 🍌🎉🐒 truly"';
         else if (/MOCK_EMPTY/.test(last)) content = '';
         else if (/MOCK_MOOD_(\w+)/.test(last)) content = last.match(/MOCK_MOOD_(\w+)/)[1] + '|A mood-tagged thought';
         else content = MOCK_THOUGHTS[(thoughtN++) % MOCK_THOUGHTS.length];

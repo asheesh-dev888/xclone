@@ -265,7 +265,9 @@ function postHTML(p, { thread = false } = {}) {
         ${aiBtn(p)}<button class="more" data-action="post-menu" data-id="${p.id}" data-mine="${mine ? 1 : 0}" aria-label="More">${ic('dots', 'icon')}</button></div>
       ${p.reply_to ? `<div class="replying">Replying to <a href="/u/${esc(p.reply_to)}" data-link>@${esc(p.reply_to)}</a></div>` : ''}
       ${challengeChip(p)}
+      ${probeChip(p)}
       ${p.text ? `<div class="text">${richText(p.text)}</div>` : ''}
+      ${probeHTML(p)}
       ${p.image ? `<div class="media"><img src="${esc(p.image)}" loading="lazy" alt=""></div>` : ''}
       ${p.video ? videoHTML(p) : ''}
       ${p.audio ? audioHTML(p) : ''}
@@ -315,12 +317,14 @@ function composerHTML({ id, placeholder = 'What is happening?!', parentId = '', 
         <button type="button" class="pe-add" data-action="poll-add">+ Add a choice</button>
         <div class="pe-row"><label>Poll length <select class="pe-len">${[[60, '1 hour'], [360, '6 hours'], [720, '12 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days']].map(([m, l]) => `<option value="${m}"${m === 1440 ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
         <button type="button" class="pe-remove" data-action="poll-toggle">Remove poll</button></div></div>`}
+      ${parentId || challenge ? '' : probeMoreHTML()}
       <div class="tools">
         <div class="tool-row"><label class="tool" title="Add photo">${ic('image')}<input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label>
         ${state.config.video ? `<label class="tool tool-video" title="Add video" aria-label="Add video">${ic('video')}<input type="file" name="video" accept="video/*,.mkv,.3gp,.mov" hidden></label>
         <label class="tool tool-record" title="Record a video" aria-label="Record a video">${ic('record')}<input type="file" name="video_capture" accept="video/*" capture="environment" hidden></label>` : ''}
         ${state.config.video && window.MediaRecorder ? `<button type="button" class="tool tool-voice" data-action="voice-rec" title="Record a voice note (up to 30 s)" aria-label="Record a voice note">${ic('mic')}</button>` : ''}
-        ${parentId ? '' : `<button type="button" class="tool tool-poll" data-action="poll-toggle" title="Poll" aria-label="Add a poll">${ic('poll')}</button>`}</div>
+        ${parentId ? '' : `<button type="button" class="tool tool-poll" data-action="poll-toggle" title="Poll" aria-label="Add a poll">${ic('poll')}</button>`}
+        ${parentId || challenge ? '' : probeSelHTML()}</div>
         <div class="right"><span class="counter"></span><button class="btn btn-primary" type="submit" disabled>${buttonLabel}</button></div>
       </div>
     </div>
@@ -396,12 +400,13 @@ document.addEventListener('submit', async (e) => {
     }
     const vo = composerVoice.get(f);
     if (vo && vo.result) fd.append('voice', JSON.stringify({ public_id: vo.result.public_id, version: vo.result.version, duration: vo.result.duration || vo.seconds, bytes: vo.result.bytes, cloud_name: vo.cloudName }));
+    probeAppend(f, fd);
     const pe = $('.poll-edit', f);
     if (pe && !pe.hidden) { fd.append('poll_options', JSON.stringify($$('.pe-opt', pe).map(i => i.value.trim()).filter(Boolean))); fd.append('poll_minutes', $('.pe-len', pe).value); }
     try {
       const { post } = await api('POST', '/api/posts', fd);
       remember([post]);
-      f.reset(); $('.preview', f).hidden = true; clearComposerVideo(f, { posted: true }); clearVoice(f, { posted: true }); pollReset(f); updateComposer(f);
+      f.reset(); $('.preview', f).hidden = true; clearComposerVideo(f, { posted: true }); clearVoice(f, { posted: true }); pollReset(f); probeReset(f); updateComposer(f);
       const inModal = f.closest('.modal');
       if (inModal) closeModal();
       if (f.dataset.challenge) { dailyLoad(); if (location.pathname === '/challenge') return viewChallenge(); }
@@ -487,7 +492,13 @@ document.addEventListener('click', async (e) => {
       const url = location.origin + '/post/' + id;
       try { if (navigator.share) await navigator.share({ url }); else { await navigator.clipboard.writeText(url); toast('Copied to clipboard'); } }
       catch { toast(url); }
-    } else if (a === 'post-menu') {
+    } else if (a === 'probe-resolve') await probeResolve(id, el.dataset.outcome);
+    else if (a === 'probe-connections') await probeConnections(id, el);
+    else if (a === 'probe-toggle') {
+      const f = el.closest('form'), pe = $('.probe-edit', f);
+      if (pe.hidden) { pe.hidden = false; el.setAttribute('aria-expanded', 'true'); $('.pk-sel', f).focus(); } else probeReset(f);
+    }
+    else if (a === 'post-menu') {
       closeMenus();
       const mine = el.dataset.mine === '1';
       el.insertAdjacentHTML('beforeend', `<div class="dropdown">${mine ? `<button class="danger" data-action="delete" data-id="${id}">${ic('trash')}Delete</button>` : ''}<button data-action="copy-link" data-id="${id}">${ic('link')}Copy link</button>${mine ? '' : `<button data-action="report" data-type="post" data-id="${id}">${ic('flag')}Report post</button>`}</div>`);
@@ -849,7 +860,7 @@ async function viewProfile(username, tab) {
       ${u.ideal ? idealBadge(u.ideal) : isMe ? `<button class="ideal-add" data-action="open-ideal">${ic('sparkle')}Choose your ideal</button>` : ''}
       ${u.bio ? `<div class="bio">${richText(u.bio)}</div>` : '<div style="height:12px"></div>'}
       <div class="facts">${u.location ? `<span>${ic('pin')}${esc(u.location)}</span>` : ''}<span>${ic('cal')}Joined ${new Date(u.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span></div>
-      <div class="counts"><a href="/u/${esc(u.username)}/following" data-link><b>${u.following}</b> Following</a><a href="/u/${esc(u.username)}/followers" data-link><b id="followers-count">${u.followers}</b> Followers</a></div>
+      <div class="counts"><a href="/u/${esc(u.username)}/following" data-link><b>${u.following}</b> Following</a><a href="/u/${esc(u.username)}/followers" data-link><b id="followers-count">${u.followers}</b> Followers</a>${calibrationHTML(u.calibration)}</div>
     </div>
     <div class="tabs" style="border-bottom:1px solid var(--border)">${tabLink('posts', 'Posts')}${tabLink('replies', 'Replies')}${tabLink('media', 'Media')}${state.config.video || tab === 'reels' ? tabLink('reels', 'Reels') : ''}${tabLink('likes', 'Likes')}</div>
     <div id="feed">${loader()}</div>`;
@@ -2604,6 +2615,9 @@ function viewSettings() {
       <section class="set-sec" id="set-momo-voice"><h2>Momo’s voice</h2>
         <label class="chk"><input type="checkbox" id="snd-on" data-momo-pref="sound" ${momoSoundOn() ? 'checked' : ''}> Momo sound effects <span class="muted small">(low volume)</span></label>
         <label class="chk"><input type="checkbox" id="snd-talks" data-momo-pref="talks" ${momoTalksOn() ? 'checked' : ''}> Momo talks <span class="muted small">reads his thought aloud (hi-IN for Hindi / Hinglish)</span></label></section>
+      <section class="set-sec" id="set-about"><h2>About ZuZu</h2>
+        <p class="about-line">Optimize for connection, not engagement.</p>
+        <p class="muted small">ZuZu weighs ideas by consequence, not popularity. Probes (claims, predictions, questions) build a track record: your calibration is how often your predictions came true. <a class="link" href="https://zuzu-site.onrender.com/constitution" target="_blank" rel="noopener">Read the ZuZu Constitution</a></p></section>
       <section class="set-sec" id="set-push"><h2>Push notifications</h2><p class="muted" id="push-status">Get notified about likes, replies, follows, mentions and messages.</p>
         <button class="btn btn-outline" data-action="push-toggle" id="push-btn" hidden></button></section>
       <section class="set-sec danger-zone" id="set-delete"><h2>Delete account</h2>
@@ -2746,6 +2760,94 @@ async function loadReports() {
 // ---------- Daily thought challenge (/challenge), ideal circles (/circle/:id), stories (home rings + viewer) ----------
 routes.push([/^\/challenge\/?$/, () => viewChallenge()]);
 routes.push([/^\/circle\/([\w-]+)(?:\/(members))?\/?$/, (m) => viewCircle(m[1], m[2] || 'posts')]);
+
+// ---------- probes: post kinds, evidence, predictions, calibration, AI librarian ----------
+const PROBE_KINDS = { claim: ['📌', 'Claim'], prediction: ['🔮', 'Prediction'], question: ['❓', 'Question'], thought_experiment: ['🧪', 'Thought experiment'], challenge: ['⚔️', 'Challenge'] };
+const CONN_REL = { supports: ['✅', 'Supports'], contradicts: ['⚡', 'Contradicts'], similar: ['🔗', 'Similar to'], testable: ['🧭', 'Testable because'] };
+function probeSelHTML() {
+  return `<button type="button" class="tool tool-probe" data-action="probe-toggle" title="Post kind: claim, prediction, question…" aria-label="Choose a post kind" aria-expanded="false">🧩</button>`;
+}
+function probeMoreHTML() {
+  return `<div class="probe-edit" hidden>
+    <label class="pk-lab">Kind <select name="kind" class="pk-sel" aria-label="Post kind"><option value="normal">Normal post</option>${Object.entries(PROBE_KINDS).map(([k, [i, l]]) => `<option value="${k}">${i} ${l}</option>`).join('')}</select></label>
+    <div class="pk-more" hidden>
+      <div class="pk-evs">${[1, 2, 3].map(n => `<input class="pk-ev" type="url" inputmode="url" maxlength="300" placeholder="Evidence link ${n} (optional)" autocomplete="off"${n > 1 ? ' hidden' : ''}>`).join('')}</div>
+      <label class="pk-by" hidden>Resolve by <input type="date" class="pk-date"></label>
+    </div></div>`;
+}
+function probeAppend(f, fd) {
+  const k = f.kind && f.kind.value; if (!k || k === 'normal') return;
+  fd.append('kind', k);
+  const ev = $$('.pk-ev', f).map(i => i.value.trim()).filter(Boolean);
+  if (ev.length) fd.append('evidence', JSON.stringify(ev));
+  const d = $('.pk-date', f);
+  if (k === 'prediction' && d && d.value) fd.append('resolve_by', String(new Date(d.value + 'T23:59:59').getTime()));
+}
+function probeReset(f) {
+  const sel = f.kind; if (!sel || !sel.classList || !sel.classList.contains('pk-sel')) return;
+  sel.value = 'normal'; $('.probe-edit', f).hidden = true; const tb = $('.tool-probe', f); if (tb) tb.setAttribute('aria-expanded', 'false'); $$('.pk-ev', f).forEach((i, n) => { i.value = ''; i.hidden = n > 0; }); const d = $('.pk-date', f); if (d) d.value = '';
+  probeSync(f);
+}
+function probeSync(f) {
+  const sel = $('.pk-sel', f); if (!sel) return;
+  const k = sel.value, more = $('.pk-more', f); if (!more) return;
+  more.hidden = k === 'normal'; $('.pk-by', f).hidden = k !== 'prediction';
+  const evs = $$('.pk-ev', f); evs.forEach((i, n) => { if (n > 0 && !evs[n - 1].value.trim() && !i.value.trim()) i.hidden = true; else i.hidden = false; });
+}
+document.addEventListener('input', (e) => { const f = e.target.closest && e.target.closest('form[data-form="compose"]'); if (f && e.target.closest('.probe-edit')) probeSync(f); });
+document.addEventListener('change', (e) => { const f = e.target.closest && e.target.closest('form[data-form="compose"]'); if (f && e.target.closest('.probe-edit')) probeSync(f); });
+function probeChip(p) {
+  const k = PROBE_KINDS[p.kind]; if (!k) return '';
+  return `<span class="probe-chip pk-${esc(p.kind)}" data-kind="${esc(p.kind)}">${k[0]} ${k[1]}</span>`;
+}
+const safeHref = (u) => /^https?:\/\//i.test(u) ? u : '#';
+function probeHTML(p) {
+  if (!PROBE_KINDS[p.kind]) return '';
+  const ev = (p.evidence || []).map(u => { let host = u; try { host = new URL(u).hostname.replace(/^www\./, ''); } catch {} return `<a class="pk-link" href="${esc(safeHref(u))}" target="_blank" rel="noopener noreferrer nofollow ugc" title="${esc(u)}">🔗 ${esc(host)}</a>`; }).join('');
+  let status = '';
+  if (p.kind === 'prediction') {
+    const mine = state.me && p.user_id === state.me.id;
+    if (p.outcome) status = `<span class="pk-out ${p.outcome === 'true' ? 'yes' : 'no'}">${p.outcome === 'true' ? '✅ Came true' : '❌ Didn’t come true'}</span>`;
+    else {
+      const due = p.resolve_by ? Date.now() >= p.resolve_by : false;
+      status = `<span class="pk-by-chip${due ? ' due' : ''}">${p.resolve_by ? (due ? '⏰ Due ' : '⏳ Resolve by ') + new Date(p.resolve_by).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '⏳ Open'}</span>`;
+      if (mine) status += `<button class="pk-btn yes" data-action="probe-resolve" data-id="${p.id}" data-outcome="true">Came true</button><button class="pk-btn no" data-action="probe-resolve" data-id="${p.id}" data-outcome="false">Didn’t</button>`;
+    }
+  }
+  const conn = state.config.ai && ['claim', 'prediction', 'question'].includes(p.kind) ? `<button class="pk-btn conn" data-action="probe-connections" data-id="${p.id}">🕸️ Connections</button>` : '';
+  if (!ev && !status && !conn) return '';
+  return `<div class="probe" data-probe="${p.id}">${ev}${status}${conn}</div><div class="conn-box" data-conn="${p.id}" hidden></div>`;
+}
+function probeRefresh(post) {
+  if (!post) return;
+  postCache.set(post.id, { ...(postCache.get(post.id) || {}), ...post });
+  const merged = postCache.get(post.id);
+  $$(`[data-probe="${post.id}"]`).forEach(el => { el.outerHTML = probeHTML(merged).replace(/<div class="conn-box"[\s\S]*$/, ''); });
+}
+function connHTML(r) {
+  if (!r.links.length) return `<div class="conn-empty">No strong connections yet. As more people post, the librarian will find them.</div>`;
+  return `<div class="conn-title">🕸️ Connections</div>` + r.links.map(l => { const [i, lab] = CONN_REL[l.relation] || ['🔗', l.relation];
+    return `<div class="conn-item"><span class="conn-rel ${esc(l.relation)}">${i} ${lab}</span> ${l.post ? `<a href="/post/${l.post.id}" data-link>@${esc(l.post.username)}: “${esc(l.post.text)}”</a>` : ''}<div class="conn-why">${esc(l.reason)}</div></div>`; }).join('') + `<div class="conn-note">Suggested by AI. Check it yourself.</div>`;
+}
+async function probeConnections(id, btn) {
+  const box = $(`[data-conn="${id}"]`); if (!box) return;
+  if (!box.hidden && box.dataset.loaded) { box.hidden = true; return; }
+  box.hidden = false; box.innerHTML = '<div class="conn-empty">The librarian is looking…</div>'; btn.disabled = true;
+  try { const r = await api('POST', `/api/posts/${id}/connections`); box.innerHTML = connHTML(r); box.dataset.loaded = '1'; }
+  catch (err) { box.innerHTML = `<div class="conn-empty">${esc(err.message)}</div>`; }
+  finally { btn.disabled = false; }
+}
+async function probeResolve(id, outcome) {
+  if (!confirm(outcome === 'true' ? 'Mark this prediction as having come true? This is final.' : 'Mark this prediction as NOT having come true? This is final.')) return;
+  const r = await api('POST', `/api/posts/${id}/resolve`, { outcome });
+  probeRefresh(r.post); toast(outcome === 'true' ? 'Marked as came true' : 'Marked as didn’t come true');
+}
+function calibrationHTML(c) {
+  if (!c) return '';
+  const tip = 'Calibration: the share of this person’s resolved predictions that came true';
+  if (!c.resolved) return `<span class="calib new" title="${tip}"><b>New</b> Calibration · 0 resolved</span>`;
+  return `<span class="calib${c.is_new ? ' new' : ''}" title="${tip}"><b>${c.score}%</b> Calibration · ${c.resolved} resolved${c.is_new ? ' <i class="calib-new">new</i>' : ''}</span>`;
+}
 function challengeChip(p) {
   if (!p.challenge) return '';
   return `<a class="challenge-chip" href="/challenge?day=${esc(p.challenge.day)}" data-link title="${esc(p.challenge.prompt)}">💭 Daily thought</a>`;
