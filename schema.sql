@@ -298,3 +298,17 @@ CREATE TABLE IF NOT EXISTS post_connections(
   links JSONB NOT NULL,
   model TEXT,
   created_at BIGINT NOT NULL);
+
+-- Games: Prediction Arena (daily round, Brier-scored) and ZuZu Royale runs. score is a 0..1000-style integer; detail holds extras.
+CREATE TABLE IF NOT EXISTS game_scores(
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  game TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'daily',
+  day TEXT NOT NULL,
+  score INTEGER NOT NULL,
+  detail JSONB,
+  created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS game_scores_board ON game_scores(game, day, score DESC);
+CREATE INDEX IF NOT EXISTS game_scores_user ON game_scores(user_id, game, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS game_scores_daily ON game_scores(user_id, game, day) WHERE mode='daily';

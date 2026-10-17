@@ -18,6 +18,7 @@ const batchd = require('./batchd');
 const recovery = require('./recovery');
 const mail = require('./mail');
 const probes = require('./probes');
+const games = require('./games');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -759,6 +760,7 @@ push.register(app, { auth, h, db });
 recovery.register(app, { auth, h, db, startSession, publicUser, findUser });
 
 // ---------- Daily thought challenge, ideal circles, stories ----------
+games.register(app, { auth, h, db, now });
 probes.register(app, { auth, h, db, postIdParam, now, getPost });
 batchd.register(app, { auth, h, db, hydrate, getPosts, saveMedia, upload, now });
 

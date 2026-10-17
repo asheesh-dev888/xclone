@@ -41,6 +41,7 @@ const P = {
   mic: 'M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z',
   poll: 'M4 4h2v16H4zm5 6h2v10H9zm5-4h2v14h-2zm5 8h2v6h-2z',
   record: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z',
+  games: 'M6.5 8h11A4.5 4.5 0 0 1 22 12.5v1A4.5 4.5 0 0 1 17.5 18c-1.4 0-2.3-.5-3.2-1.4L13 15.3h-2l-1.3 1.3C8.8 17.5 7.9 18 6.5 18A4.5 4.5 0 0 1 2 13.5v-1A4.5 4.5 0 0 1 6.5 8zM7 10.5v1.25H5.75v1.5H7.01v1.25h1.5v-1.25h1.25v-1.5H8.5V10.5H7zm9.25.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm2.5 1.75a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
   reels: 'M5.5 3h13C19.88 3 21 4.12 21 5.5v13c0 1.38-1.12 2.5-2.5 2.5h-13C4.12 21 3 19.88 3 18.5v-13C3 4.12 4.12 3 5.5 3zM5 9v9.5c0 .28.22.5.5.5h13c.28 0 .5-.22.5-.5V9H5zm0-2h2.6l2-2H5.5c-.28 0-.5.22-.5.5V7zm5.4 0h3.2l2-2h-3.2l-2 2zm6 0H19V5.5c0-.28-.22-.5-.5-.5h-.1l-2 2zM10 10.8l5.2 3.2-5.2 3.2v-6.4z',
   reelsFill: 'M5.5 3h1.9l-4 4H3V5.5C3 4.12 4.12 3 5.5 3zm4.7 0h3.2l-4 4H6.2l4-4zm6 0h2.3C19.88 3 21 4.12 21 5.5V7h-8.8l4-4zM3 9h18v9.5c0 1.38-1.12 2.5-2.5 2.5h-13C4.12 21 3 19.88 3 18.5V9zm7 1.8v6.4l5.2-3.2-5.2-3.2z',
   volOn: 'M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM3 9v6h4l5 5V4L7 9H3z',
@@ -162,7 +163,7 @@ function go(url, replace) {
   render();
 }
 async function render() {
-  closeMenus(); closeAi(); reelsTeardown();
+  closeMenus(); closeAi(); reelsTeardown(); if (window.__gameTeardown) { try { window.__gameTeardown(); } catch {} window.__gameTeardown = null; }
   $$('#app form[data-form="compose"]').forEach(f => { clearComposerVideo(f); clearVoice(f); }); // leaving the page drops an unposted upload
   const p = location.pathname;
   if (!state.me && !PUBLIC.includes(p)) return go('/login', true);
@@ -197,6 +198,7 @@ function shell(center, { active = '', layout = '' } = {}) {
       ${navItem('/home', 'home', 'home', 'homeFill', 'Home')}
       ${navItem('/explore', 'explore', 'search', null, 'Explore')}
       ${state.config.video ? navItem('/reels', 'reels', 'reels', 'reelsFill', 'Reels') : ''}
+      ${navItem('/games', 'games', 'games', null, 'Games')}
       ${navItem('/notifications', 'notifications', 'bell', null, 'Notifications')}
       ${navItem('/messages', 'messages', 'mail', 'mailFill', 'Messages')}
       ${navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
@@ -228,6 +230,7 @@ function shell(center, { active = '', layout = '' } = {}) {
     <a href="/home" data-link>${ic(active === 'home' ? 'homeFill' : 'home')}</a>
     <a href="/explore" data-link>${ic('search')}</a>
     ${state.config.video ? `<a href="/reels" data-link aria-label="Reels" class="bn-reels">${ic(active === 'reels' ? 'reelsFill' : 'reels')}</a>` : ''}
+    <a href="/games" data-link aria-label="Games" class="bn-games">${ic('games')}</a>
     <a href="/notifications" data-link aria-label="Notifications">${ic('bell')}${state.unread ? `<span class="badge">${state.unread}</span>` : ''}</a>
     <a href="/messages" data-link aria-label="Messages">${ic(active === 'messages' ? 'mailFill' : 'mail')}${dmBadge()}</a>
     <a href="/u/${esc(me.username)}" data-link>${ic(active === 'profile' ? 'userFill' : 'user')}</a>
@@ -2221,6 +2224,29 @@ function momoSfx(name, opts = {}) {
     return true;
   } catch { return false; }
 }
+// Game sounds share Momo's sound toggle, audio context and master volume (low by default).
+const GSND = {
+  tick: (b, t) => sndTone(b, t, { type: 'triangle', path: [[0, 900], [0.04, 900]], dur: 0.05, vol: 0.2 }),
+  right: (b, t) => { sndTone(b, t, { path: [[0, 660], [0.1, 660]], dur: 0.12, vol: 0.35 }); sndTone(b, t + 0.1, { path: [[0, 990], [0.2, 990]], dur: 0.22, vol: 0.35 }); },
+  wrong: (b, t) => sndTone(b, t, { type: 'sawtooth', path: [[0, 300], [0.25, 130]], dur: 0.28, vol: 0.28, lp: 900 }),
+  shoot: (b, t) => sndTone(b, t, { type: 'square', path: [[0, 900], [0.09, 280]], dur: 0.1, vol: 0.16, lp: 2200 }),
+  hit: (b, t) => { sndNoiseBurst(b, t, { type: 'lowpass', f: [[0, 1800], [0.1, 300]], q: 0.7, dur: 0.12, vol: 0.4, attack: 0.004 }); },
+  pickup: (b, t) => { sndTone(b, t, { path: [[0, 784], [0.07, 784]], dur: 0.08, vol: 0.3 }); sndTone(b, t + 0.07, { path: [[0, 1175], [0.1, 1175]], dur: 0.12, vol: 0.3 }); },
+  zone: (b, t) => sndTone(b, t, { type: 'sawtooth', path: [[0, 180], [0.5, 120]], dur: 0.55, vol: 0.2, lp: 500 }),
+  win: (b, t) => [523, 659, 784, 1047, 1319].forEach((f, i) => sndTone(b, t + i * 0.11, { type: 'triangle', path: [[0, f], [0.25, f]], dur: 0.3, vol: 0.35 })),
+  lose: (b, t) => [440, 392, 330, 262].forEach((f, i) => sndTone(b, t + i * 0.16, { type: 'triangle', path: [[0, f], [0.25, f]], dur: 0.3, vol: 0.3 })),
+};
+const gsndLast = {};
+function gameSfx(name) {
+  if (!GSND[name] || !momoSoundOn() || !snd.unlocked || !snd.ctx || document.hidden) return false;
+  const now = performance.now(); if (now - (gsndLast[name] || -1e9) < 60) return false; gsndLast[name] = now;
+  try {
+    if (snd.ctx.state === 'suspended') snd.ctx.resume();
+    const bus = snd.ctx.createGain(); bus.gain.value = 1; bus.connect(snd.master); GSND[name](bus, snd.ctx.currentTime + 0.005);
+    window.__gameSounds && window.__gameSounds.push(name); return true;
+  } catch { return false; }
+}
+window.__zg = { api, shell, esc, toast, go, state, avatar, loader, sfx: gameSfx, soundOn: () => momoSoundOn(), get meName() { return state.me && state.me.username; } };
 const MOMO_MOOD_SFX = { funny: 'giggle', mindblown: 'whoa', love: 'aww', sleepy: 'yawn', cheering: 'cheer', scared: 'squeak' };
 function momoSoundToggle() {
   const on = !momoSoundOn();
@@ -2457,6 +2483,17 @@ setInterval(async () => {
 
 // ---------- Settings (/settings): account deletion; reports (posts, profiles, DM messages); admin report queue ----------
 routes.push([/^\/settings\/?$/, () => viewSettings()]);
+// Games (lazy-loaded /games.js): lobby, Prediction Arena, ZuZu Royale
+let gamesLoad = null;
+function loadGames() {
+  if (window.ZuzuGames) return Promise.resolve(window.ZuzuGames);
+  return gamesLoad || (gamesLoad = new Promise((res, rej) => { const s = document.createElement('script'); s.src = '/games.js?v=18'; s.onload = () => res(window.ZuzuGames); s.onerror = () => { gamesLoad = null; rej(new Error('Couldn’t load games')); }; document.head.appendChild(s); }));
+}
+async function viewGame(which) {
+  shell(`<div class="header"><div class="header-row"><h1>Games</h1></div></div><div id="games-root">${loader()}</div>`, { active: 'games' });
+  try { const G = await loadGames(); if (location.pathname.startsWith('/games')) G[which](); } catch (e) { const r = $('#games-root'); if (r) r.innerHTML = `<div class="empty"><h3>${esc(e.message)}</h3></div>`; }
+}
+routes.push([/^\/games\/?$/, () => viewGame('lobby')], [/^\/games\/arena\/?$/, () => viewGame('arena')], [/^\/games\/royale\/?$/, () => viewGame('royale')]);
 // ---------- Polls (2–4 choices, 1 hour – 7 days, one vote each; results after voting or when it ends) ----------
 function pollLeft(ms) {
   const m = Math.max(0, Math.round((ms - Date.now()) / 60000));

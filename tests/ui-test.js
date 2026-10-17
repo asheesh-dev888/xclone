@@ -25,6 +25,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   };
   const errors = [];
   if (process.env.UI_ONLY === 'probes') { await probesUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
+  if (process.env.UI_ONLY === 'games') { await gamesUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'sound') { await momoSoundUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'momo') { await momoReactUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'recovery') { await recoveryUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
@@ -209,6 +210,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await momoReactUi(errors, step);
   await momoSoundUi(errors, step);
   await probesUi(errors, step);
+  await gamesUi(errors, step);
   console.log('\n  Settings: language + push');
   await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -1967,4 +1969,67 @@ async function recoveryUi(errors, step) {
     step('verify link → reset link → /reset page sets the new password and login works');
     await p.goto(B + '/settings'); await p.fill('#del-confirm', un); await p.click('form[data-form=delete-account] button[type=submit]'); await p.waitForFunction(async () => (await (await fetch('/api/me')).json()).user === null);
   } finally { await br.close(); app.child.kill(); msrv.close(); }
+}
+
+async function gamesUi(errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
+  console.log('\n  Games: lobby, Prediction Arena, ZuZu Royale');
+  const { startApp } = require('./ai-server');
+  const app = await startApp({ port: 4234 });
+  const B = app.url, un = 'gmui' + Math.floor(Math.random() * 1e6);
+  const br = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const ctx = await br.newContext({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true });
+  const p = await ctx.newPage(); p.on('pageerror', e => errors.push(e.message)); p.on('dialog', d => d.accept());
+  try {
+    await p.goto(B + '/signup'); await p.waitForSelector('form[data-mode=signup]');
+    await p.fill('input[name=username]', un); await p.fill('input[name=password]', 'secret123');
+    await p.click('form[data-mode=signup] button[type=submit]'); await waitHome(p);
+    const bn = await p.locator('.bottom-nav a').evaluateAll(a => a.map(x => { const r = x.getBoundingClientRect(); return [r.left, r.right]; }));
+    if (bn.some(([l, r]) => l < -1 || r > 391)) throw new Error('bottom nav overflows at 390px');
+    await p.locator('.bottom-nav a.bn-games').click(); await p.waitForSelector('[data-testid=card-arena]');
+    step('Games tab in the bottom nav opens the lobby with both games');
+    // Arena
+    await p.click('[data-testid=card-arena]'); await p.waitForSelector('[data-testid=arena-q]');
+    for (let i = 0; i < 5; i++) {
+      await p.waitForSelector('[data-testid=arena-q]');
+      if (!(await p.locator('#gm-next').isDisabled())) throw new Error('lock button should wait for a choice');
+      await p.locator('.gm-side.yes').click(); await p.locator('#gm-slider').fill(String(60 + i * 5)); await p.locator('#gm-next').click();
+    }
+    await p.waitForSelector('[data-testid=arena-results] .gm-score span');
+    const sc = +(await p.locator('.gm-score span').innerText());
+    if (!(sc >= 0 && sc <= 1000) || (await p.locator('.gm-row').count()) !== 5) throw new Error('bad arena results');
+    await p.waitForSelector('#gm-lb .gm-board li.me');
+    if (!(await p.locator('a[href^="/u/"]', { hasText: 'calibration' }).count())) throw new Error('calibration link missing');
+    step('Arena: 5 questions with confidence stake, Brier score, explanations, leaderboard and calibration link (score ' + sc + ')');
+    await p.goto(B + '/games/arena'); await p.waitForSelector('[data-testid=arena-results]');
+    step('replaying the same day shows the saved result (one ranked play per day)');
+    // Royale (play, bots move, results, score saved)
+    await p.goto(B + '/games/royale'); await p.waitForSelector('[data-testid=royale-play]');
+    await p.click('[data-testid=royale-play]'); await p.waitForSelector('#royale-root #rr-cv');
+    if (!(await p.locator('#rr-stick').count()) || !(await p.locator('#rr-fire').count())) throw new Error('touch controls missing');
+    const pos0 = await p.evaluate(() => window.__royale.ents.slice(1).map(e => [e.x, e.y]));
+    await p.waitForTimeout(2500);
+    const moved = await p.evaluate((p0) => window.__royale.ents.slice(1).filter((e, i) => Math.hypot(e.x - p0[i][0], e.y - p0[i][1]) > 5).length, pos0);
+    if (moved < 10) throw new Error('bots are not moving (' + moved + ')');
+    const painted = await p.evaluate(() => { const c = window.__royale.canvas, d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const seen = new Set(); for (let i = 0; i < d.length; i += 4 * 997) seen.add(d[i] >> 5 << 6 | d[i + 1] >> 5 << 3 | d[i + 2] >> 5); return seen.size; });
+    if (painted < 4) throw new Error('canvas looks blank');
+    step('Royale: canvas renders, ' + moved + ' bots moving, touch joystick + fire button present');
+    const b0 = await p.locator('#rr-fire').boundingBox(); await p.touchscreen.tap(b0.x + 20, b0.y + 20);
+    await p.evaluate(() => window.__royale.finish(1));
+    await p.waitForSelector('[data-testid=royale-results]');
+    await p.waitForFunction(() => /Saved/.test(document.querySelector('#rr-saved').textContent), null, { timeout: 8000 });
+    if (!/won|Last monkey/i.test(await p.locator('.rr-card h2').innerText())) throw new Error('win screen missing');
+    step('Royale results: win screen, share button, score saved');
+    await p.click('#rr-lobby'); await p.waitForSelector('[data-testid=card-royale]');
+    if (await p.locator('#royale-root').count()) throw new Error('royale overlay not removed');
+    await p.waitForSelector('.gm-meta b'); 
+    const lb = await ctx.request.get(B + '/api/games/royale/leaderboard'); const j = await lb.json();
+    if (!j.items.some(x => x.username === un && x.score === 1500)) throw new Error('royale score missing from leaderboard: ' + JSON.stringify(j.items));
+    step('Royale score appears on the daily leaderboard; overlay cleaned up');
+    // natural death path: let the zone/bots run on a desktop viewport without errors
+    await p.goto(B + '/games/royale'); await p.click('[data-testid=royale-play]'); await p.waitForSelector('#rr-cv');
+    await p.evaluate(() => { const r = window.__royale; r.P.hp = 0.1; r.P.x = 5; r.P.y = 5; });
+    await p.waitForSelector('[data-testid=royale-results]', { timeout: 15000 });
+    step('Royale: being eliminated shows the results screen');
+  } finally { await br.close(); app.child.kill(); }
 }

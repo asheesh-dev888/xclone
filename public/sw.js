@@ -2,10 +2,10 @@
 // Never caches API (including direct messages under /api/dm, ZuZu AI answers under /api/ai, Momo's thoughts under /api/monkey,
 // admin stats under /api/admin and video upload signing under /api/video), the /admin page, auth, media uploads, app downloads
 // (/download), videos (Cloudinary URLs, <video> and Range requests) or non-GET requests.
-const CACHE = 'zuzu-v17';
+const CACHE = 'zuzu-v18';
 // Paths that always go straight to the network and are never cached.
 const BYPASS = /^\/(api|admin|auth|media|download|healthz|\.well-known)(\/|$)/;
-const SHELL = ['/', '/style.css', '/app.js', '/ideals.js', '/i18n.js', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
+const SHELL = ['/', '/style.css', '/app.js', '/games.js', '/ideals.js', '/i18n.js', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));
