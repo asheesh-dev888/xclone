@@ -1286,7 +1286,7 @@ async function pushTests() {
     ok(tb.source === 'ai' && !/always reply in Hinglish/.test(mock.calls[mock.calls.length - 1].body.messages[0].content), 'other users (auto) get their own thought');
     // index.html loads the translator; sw handles push
     const html = (await anon('GET', '/', null, true)).text, sw = (await anon('GET', '/sw.js', null, true)).text;
-    ok(/\/i18n\.js/.test(html) && /addEventListener\('push'/.test(sw) && /notificationclick/.test(sw) && /zuzu-v1[1-9]/.test(sw), 'i18n script + SW push handlers + cache bumped');
+    ok(/\/i18n\.js/.test(html) && /addEventListener\('push'/.test(sw) && /notificationclick/.test(sw) && /zuzu-v(1[1-9]|[2-9]\d)/.test(sw), 'i18n script + SW push handlers + cache bumped');
     await a('DELETE', '/api/me', { confirm: ua }); await b('DELETE', '/api/me', { confirm: ub });
     if (fail && process.env.API_ONLY === 'push') console.log(app.log().slice(-1500));
   } finally { app.child.kill(); off.child.kill(); mock.srv.close(); ps.close(); }

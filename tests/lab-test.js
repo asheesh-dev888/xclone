@@ -23,6 +23,23 @@ const uname = (p) => p + Math.random().toString(36).slice(2, 8);
   const net = TB.load(TBm), top = (q) => { const p = net.infer(q).probs; return TBm.intents[p.indexOf(Math.max(...p))]; };
   ok(top('ek joke sunao') === 'joke' && top('hello') === 'greeting' && top('कहानी सुनाओ') === 'story', 'Trit Bot ternary engine: joke / greeting / Hindi story intents');
   ok(net.zeros > 0 && net.total === TBm.NB * TBm.H + TBm.H * TBm.C, 'Trit Bot weights unpack to ternary (' + (100 * net.zeros / net.total).toFixed(0) + '% zeros)');
+  // S-Bot: self-contained page, weights only {0,1} plus sparse ∞ collapse links, base-3 softmax, bilingual S-framework intents
+  const sb = fs.readFileSync(path.join(pub, 'lab/sbot.html'), 'utf8');
+  ok(!/https?:\/\//i.test(sb) && !/\b(fetch|XMLHttpRequest|sendBeacon|WebSocket|eval|importScripts)\s*\(|document\.cookie|localStorage|<script[^>]+src=/.test(sb) && !/api[_-]?key|secret|token/i.test(sb), 'sbot.html has no network calls, external scripts or secrets');
+  ok(!/akhil|ranjan|rajan/i.test(sb + fs.readFileSync(path.join(pub, 'lab.html'), 'utf8')), 'S-Bot and Lab pages carry no personal names');
+  const SBm = JSON.parse(sb.match(/const MODEL=(\{.*?\});<\/script>/s)[1]);
+  if (typeof atob === 'undefined') global.atob = (x) => Buffer.from(x, 'base64').toString('binary');
+  const SBe = new Function(sb.match(/\/\*SENGINE\*\/([\s\S]*?)\/\*SEND\*\//)[1] + '\nreturn SB;')();
+  const sn = SBe.load(SBm), si = (q) => sn.infer(q);
+  ok(si('what is S').intent === 's_unity' && si('S kya hai').intent === 's_unity', "'what is S' and 'S kya hai' → Sacred Unity");
+  ok(si('why is 3S = 3').intent === 's_collapse' && si('what is S divided by S').intent === 's_singularity' && si('black hole information').intent === 's_physics' && si('hello').intent === 'greeting' && si('joke sunao').intent === 'joke', 'collapse / singularity / physics / greeting / joke intents');
+  const c = si('what is the collapse rule'); ok(c.collapsed && c.state === '∞' && c.intent === 's_collapse', '∞ keyword collapses the decision outright (k·S = k)');
+  const gb = si('asdf qwzx'); ok(gb.intent === 'unknown' && gb.state === '0', 'gibberish → S = 0 void');
+  ok(si('hello').state === '1' && !si('hello').collapsed, 'ordinary answer → S = 1 unity');
+  const pp = SBe.p3([1, 0]); ok(Math.abs(pp[0] - 0.75) < 1e-9, 'base-3 softmax: 3^1/(3^1+3^0) = 0.75');
+  ok(sn.zeros > 0 && sn.total === SBm.nets.length * (SBm.NB * SBm.H + 2 * SBm.H * SBm.C) && Object.keys(SBm.INF).length <= 20, 'S-Bot weights are 0/1 bits (' + (100 * sn.zeros / sn.total).toFixed(0) + '% void) with ' + Object.keys(SBm.INF).length + ' sparse ∞ links');
+  ok(Object.values(SBm.replies).every(r => r.en && r.hi) && ['s_maths', 's_physics', 's_mind'].every(k => /speculative/i.test(SBm.replies[k].en)), 'every intent has English + Hinglish replies; maths/physics/mind flagged speculative');
+  ok(SBm.stats.heldout_acc >= 0.85 && SBm.stats.gibberish_rej >= 0.9, 'S-Bot held-out ' + (100 * SBm.stats.heldout_acc).toFixed(1) + '%, gibberish rejection ' + (100 * SBm.stats.gibberish_rej).toFixed(0) + '%');
   // tagger model
   global.window = {}; global.document = { getElementById: () => null };
   const g = {}; new Function('window', 'document', files[1][1].replace('if(typeof module', 'if(false&&typeof module') + '\n' + files[3][1] + '\nreturn window;')(g, global.document);
@@ -37,10 +54,13 @@ const uname = (p) => p + Math.random().toString(36).slice(2, 8);
     ok(r.status === 200 && /AI Lab · ZuZu/.test(html) && /id="lab-back"/.test(html) && !/<script[^>]+src="https?:/.test(html), '/lab serves the static Lab page with a ZuZu header and back link');
     ok((await fetch(B + '/lab/')).status === 200, '/lab/ works too');
     ok(/href="\/lab\/tritbot"/.test(html) && /Chat with Trit Bot/.test(html), 'Lab links to Trit Bot with a card');
+    ok(/href="\/lab\/sbot"/.test(html) && /Chat with S-Bot/.test(html), 'Lab links to S-Bot with a card');
+    r = await fetch(B + '/lab/sbot'); const sbh = await r.text(); ok(r.status === 200 && /S-Bot · ZuZu AI Lab/.test(sbh) && /id="sb-back" aria-label="Back to the AI Lab"/.test(sbh) && /href="\/lab"/.test(sbh), '/lab/sbot serves S-Bot with a ZuZu header and back link');
+    ok((await fetch(B + '/lab/sbot/')).status === 200, '/lab/sbot/ works too');
     r = await fetch(B + '/lab/tritbot'); const tbh = await r.text(); ok(r.status === 200 && /Trit Bot · ZuZu AI Lab/.test(tbh) && /id="tb-back"/.test(tbh), '/lab/tritbot serves Trit Bot with a ZuZu header and back link');
     for (const f of ['core.js', 'lab.js', 'tagger.js']) { r = await fetch(B + '/lab/' + f); ok(r.status === 200 && /javascript/.test(r.headers.get('content-type')), '/lab/' + f + ' served as JS'); }
     r = await fetch(B + '/games'); ok(/<div id="app"|app\.js/.test(await r.text()), 'SPA routes still get the app shell');
-    const sw = await (await fetch(B + '/sw.js')).text(); ok(/zuzu-v19/.test(sw) && /lab/.test(sw), 'sw v19 and the Lab never replaces the cached app shell');
+    const sw = await (await fetch(B + '/sw.js')).text(); ok(/zuzu-v20/.test(sw) && /lab/.test(sw), 'sw v20 and the Lab never replaces the cached app shell');
     // Sharpness over the wire
     let cookie = ''; const call = async (m, p, body) => { const h = { 'content-type': 'application/json' }; if (cookie) h.cookie = cookie; const res = await fetch(B + p, { method: m, headers: h, body: body && JSON.stringify(body) }); const sc = res.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0]; return res; };
     await call('POST', '/api/signup', { username: uname('lab_'), password: 'secret123' });

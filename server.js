@@ -789,6 +789,7 @@ app.use((err, req, res, next) => {
 });
 
 // AI Lab: a standalone static page (not part of the SPA).
+app.get(['/lab/sbot', '/lab/sbot/'], (req, res) => res.sendFile(path.join(ROOT, 'public', 'lab', 'sbot.html')));
 app.get(['/lab/tritbot', '/lab/tritbot/'], (req, res) => res.sendFile(path.join(ROOT, 'public', 'lab', 'tritbot.html')));
 app.get(['/lab', '/lab/'], (req, res) => res.sendFile(path.join(ROOT, 'public', 'lab.html')));
 app.use(express.static(path.join(ROOT, 'public'), { index: false }));
