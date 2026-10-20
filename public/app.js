@@ -199,6 +199,7 @@ function shell(center, { active = '', layout = '' } = {}) {
       ${navItem('/explore', 'explore', 'search', null, 'Explore')}
       ${state.config.video ? navItem('/reels', 'reels', 'reels', 'reelsFill', 'Reels') : ''}
       ${navItem('/games', 'games', 'games', null, 'Games')}
+      <a class="nav-item" href="/lab" data-lab>${ic('sparkle')}<span class="lbl">AI Lab</span></a>
       ${navItem('/notifications', 'notifications', 'bell', null, 'Notifications')}
       ${navItem('/messages', 'messages', 'mail', 'mailFill', 'Messages')}
       ${navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
@@ -1628,7 +1629,7 @@ function openAi(id, opener) {
       <span class="ai-count"></span>
       <button class="ai-send" type="submit" aria-label="Ask" title="Ask (Enter)" disabled>${ic('send')}</button>
     </form>
-    <div class="ai-note">ZuZu AI can make mistakes and can’t browse the web.</div>
+    <div class="ai-note"><label class="ai-sharp">Sharpness <select data-ai-sharp aria-label="AI sharpness"><option value="natural"${aiSharp() === 'natural' ? ' selected' : ''}>Natural (base-e)</option><option value="sharp"${aiSharp() === 'sharp' ? ' selected' : ''}>Sharp (base-3, T≈0.91)</option></select></label> · <a class="link" href="/lab">What’s this?</a><br>ZuZu AI can make mistakes and can’t browse the web.</div>
   </section>`;
   document.body.appendChild(root);
   document.body.classList.add('ai-open');
@@ -1636,6 +1637,10 @@ function openAi(id, opener) {
   if (!matchMedia('(hover:none)').matches) $('.ai-ask textarea', root).focus();
   aiSwipe(root);
 }
+// Sharpness (base-e vs base-3 softmax) is remembered per account on this device.
+const aiSharpKey = () => 'zuzu.ai-sharpness.' + ((state.me && state.me.username) || 'anon');
+function aiSharp() { try { const v = localStorage.getItem(aiSharpKey()); return v === 'sharp' ? 'sharp' : 'natural'; } catch { return 'natural'; } }
+document.addEventListener('change', (e) => { const s = e.target.closest && e.target.closest('[data-ai-sharp]'); if (!s) return; try { localStorage.setItem(aiSharpKey(), s.value === 'sharp' ? 'sharp' : 'natural'); } catch {} });
 function closeAi() {
   const root = $('#ai-root'); if (!root) return;
   if (ai.ctrl) ai.ctrl.abort();
@@ -1688,7 +1693,7 @@ async function aiSend(body, label) {
     const r = await fetch(`/api/ai/post/${post.id}`, {
       method: 'POST', credentials: 'same-origin', signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ ...body, history: ai.history, lang: navigator.language || 'en' }),
+      body: JSON.stringify({ ...body, history: ai.history, lang: navigator.language || 'en', sharpness: aiSharp() }),
     });
     if (!r.ok || !(r.headers.get('content-type') || '').startsWith('text/event-stream')) {
       let d = {}; try { d = await r.json(); } catch {}
@@ -2487,12 +2492,13 @@ routes.push([/^\/settings\/?$/, () => viewSettings()]);
 let gamesLoad = null;
 function loadGames() {
   if (window.ZuzuGames) return Promise.resolve(window.ZuzuGames);
-  return gamesLoad || (gamesLoad = new Promise((res, rej) => { const s = document.createElement('script'); s.src = '/games.js?v=18'; s.onload = () => res(window.ZuzuGames); s.onerror = () => { gamesLoad = null; rej(new Error('Couldn’t load games')); }; document.head.appendChild(s); }));
+  return gamesLoad || (gamesLoad = new Promise((res, rej) => { const s = document.createElement('script'); s.src = '/games.js?v=19'; s.onload = () => res(window.ZuzuGames); s.onerror = () => { gamesLoad = null; rej(new Error('Couldn’t load games')); }; document.head.appendChild(s); }));
 }
 async function viewGame(which) {
   shell(`<div class="header"><div class="header-row"><h1>Games</h1></div></div><div id="games-root">${loader()}</div>`, { active: 'games' });
   try { const G = await loadGames(); if (location.pathname.startsWith('/games')) G[which](); } catch (e) { const r = $('#games-root'); if (r) r.innerHTML = `<div class="empty"><h3>${esc(e.message)}</h3></div>`; }
 }
+routes.push([/^\/lab\/?$/, () => location.replace('/lab')]); // standalone page: leave the SPA
 routes.push([/^\/games\/?$/, () => viewGame('lobby')], [/^\/games\/arena\/?$/, () => viewGame('arena')], [/^\/games\/royale\/?$/, () => viewGame('royale')]);
 // ---------- Polls (2–4 choices, 1 hour – 7 days, one vote each; results after voting or when it ends) ----------
 function pollLeft(ms) {
@@ -2654,7 +2660,8 @@ function viewSettings() {
         <label class="chk"><input type="checkbox" id="snd-talks" data-momo-pref="talks" ${momoTalksOn() ? 'checked' : ''}> Momo talks <span class="muted small">reads his thought aloud (hi-IN for Hindi / Hinglish)</span></label></section>
       <section class="set-sec" id="set-about"><h2>About ZuZu</h2>
         <p class="about-line">Optimize for connection, not engagement.</p>
-        <p class="muted small">ZuZu weighs ideas by consequence, not popularity. Probes (claims, predictions, questions) build a track record: your calibration is how often your predictions came true. <a class="link" href="https://zuzu-site.onrender.com/constitution" target="_blank" rel="noopener">Read the ZuZu Constitution</a></p></section>
+        <p class="muted small">ZuZu weighs ideas by consequence, not popularity. Probes (claims, predictions, questions) build a track record: your calibration is how often your predictions came true. <a class="link" href="https://zuzu-site.onrender.com/constitution" target="_blank" rel="noopener">Read the ZuZu Constitution</a></p>
+        <p class="muted small">Curious how the AI works? <a class="link" href="/lab" id="about-lab">Open the AI Lab</a>: what if e = 3, ternary weights and the Sharpness setting explained.</p></section>
       <section class="set-sec" id="set-push"><h2>Push notifications</h2><p class="muted" id="push-status">Get notified about likes, replies, follows, mentions and messages.</p>
         <button class="btn btn-outline" data-action="push-toggle" id="push-btn" hidden></button></section>
       <section class="set-sec danger-zone" id="set-delete"><h2>Delete account</h2>

@@ -23,6 +23,7 @@
         <p>You vs 19 Momo bots with banana blasters. Grab loot, stay in the shrinking zone, be the last monkey standing. No gore, just bananas.</p>
         <div class="gm-meta">${s.royale.plays ? `Best score <b>${s.royale.best}</b> · ${s.royale.plays} runs` : 'Free to play · works on phones'}</div></div></a>
       <section class="gm-sec"><h3>Today’s Arena top 3</h3>${boardHTML(top, x => x.score)}</section>
+      <a class="gm-card lab" href="/lab" data-testid="card-lab"><div class="gm-art">🧪</div><div class="gm-body"><h2>AI Lab</h2><p>What if e = 3? Play with base-3 softmax, ternary weights and a tiny on-device sentiment tagger.</p></div></a>
       <p class="muted small">Your calibration lives on your profile. <a class="link" href="/u/${esc(Z.meName)}" data-link>See it →</a></p></div>`;
   }
 

@@ -1112,3 +1112,4 @@ body.royale-on{overflow:hidden}
 .rr-card{background:#15181c;color:#e7e9ea;border:1px solid var(--border);border-radius:20px;padding:22px;text-align:center;max-width:380px;width:100%}
 .rr-trophy{font-size:54px}.rr-card h2{margin:4px 0}.rr-place{font-size:44px;font-weight:900;color:#ffd43b}.rr-place small{font-size:16px;color:var(--muted)}
 .rr-stats{display:flex;justify-content:center;gap:14px;margin:10px 0;font-size:14px}
+.gm-card.lab{background:linear-gradient(135deg,rgba(255,183,77,.16),rgba(79,195,247,.10))}

@@ -788,6 +788,9 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: err.status ? err.message : 'Server error' });
 });
 
+// AI Lab: a standalone static page (not part of the SPA).
+app.get(['/lab/tritbot', '/lab/tritbot/'], (req, res) => res.sendFile(path.join(ROOT, 'public', 'lab', 'tritbot.html')));
+app.get(['/lab', '/lab/'], (req, res) => res.sendFile(path.join(ROOT, 'public', 'lab.html')));
 app.use(express.static(path.join(ROOT, 'public'), { index: false }));
 app.get('*', (req, res) => res.sendFile(path.join(ROOT, 'public', 'index.html')));
 

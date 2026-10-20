@@ -25,6 +25,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   };
   const errors = [];
   if (process.env.UI_ONLY === 'probes') { await probesUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
+  if (process.env.UI_ONLY === 'lab') { await labUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'games') { await gamesUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'sound') { await momoSoundUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
   if (process.env.UI_ONLY === 'momo') { await momoReactUi(errors, (m) => console.log('  ✓', m)); console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors'); await browser.close(); process.exit(errors.length ? 1 : 0); }
@@ -211,6 +212,7 @@ const imgLoaded = (page, sel) => page.waitForFunction((s) => { const i = documen
   await momoSoundUi(errors, step);
   await probesUi(errors, step);
   await gamesUi(errors, step);
+  await labUi(errors, step);
   console.log('\n  Settings: language + push');
   await settingsUi(browser, errors, step);
   console.log(errors.length ? 'JS errors:\n' + errors.join('\n') : 'No JS errors');
@@ -2032,4 +2034,55 @@ async function gamesUi(errors, step) {
     await p.waitForSelector('[data-testid=royale-results]', { timeout: 15000 });
     step('Royale: being eliminated shows the results screen');
   } finally { await br.close(); app.child.kill(); }
+}
+
+async function labUi(errors, step) {
+  if (!/^http:\/\/(localhost|127\.0\.0\.1)/.test(BASE)) return console.log('  (skipping: needs a local server)');
+  console.log('\n  AI Lab + Sharpness');
+  const { startMockGroq, startApp } = require('./ai-server');
+  const mock = await startMockGroq();
+  const app = await startApp({ port: 4244, ai: { baseUrl: mock.url } });
+  const B = app.url, un = 'labui' + Math.floor(Math.random() * 1e6);
+  const br = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const ctx = await br.newContext({ viewport: { width: 1280, height: 900 } });
+  const p = await ctx.newPage(); p.on('pageerror', e => errors.push(e.message)); p.on('dialog', d => d.accept());
+  try {
+    await p.goto(B + '/signup'); await p.waitForSelector('form[data-mode=signup]');
+    await p.fill('input[name=username]', un); await p.fill('input[name=password]', 'secret123');
+    await p.click('form[data-mode=signup] button[type=submit]'); await waitHome(p);
+    await p.click('.nav a[href="/lab"]'); await p.waitForURL(B + '/lab'); await p.waitForSelector('#tg-in');
+    if (!(await p.locator('.zh .logo').isVisible()) || !(await p.locator('#lab-back').isVisible())) throw new Error('ZuZu header/back link missing');
+    await p.fill('#tg-in', 'aaj bahut khush hoon'); await p.waitForFunction(() => document.querySelector('#tg-badge').className.includes('pos'));
+    await p.fill('#tg-in', 'bahut bura laga'); await p.waitForFunction(() => document.querySelector('#tg-badge').className.includes('neg'));
+    await p.waitForFunction(() => window.DONE && window.TDONE, null, { timeout: 60000 });
+    step('sidebar AI Lab opens the static Lab: trainers finish, ternary tagger badge tags positive/negative');
+    await p.click('#tritbot-card'); await p.waitForURL(B + '/lab/tritbot'); await p.waitForSelector('#log .m.b');
+    await p.fill('#q', 'ek joke sunao'); await p.press('#q', 'Enter');
+    await p.waitForFunction(() => document.querySelectorAll('#log .m.b').length >= 2 && /→ joke/.test(document.querySelector('#log .m.b:last-child .meta').textContent));
+    await p.click('.chips button >> text=कहानी सुनाओ'); await p.waitForFunction(() => /→ story/.test(document.querySelector('#log .m.b:last-child .meta')?.textContent || ''));
+    await p.click('#tb-back'); await p.waitForURL(B + '/lab'); await p.waitForSelector('#tritbot-card');
+    step('Trit Bot: card on /lab opens the chatbot; English + Hindi replies with intent chips; back link returns to the Lab');
+    await p.click('#lab-back'); await waitHome(p);
+    step('back link returns to the SPA');
+    await p.goto(B + '/settings'); await p.waitForSelector('#about-lab');
+    await p.goto(B + '/games'); await p.waitForSelector('[data-testid=card-lab]');
+    await p.goto(B + '/home'); await waitHome(p);
+    if (await p.locator('#feed #tg-badge, #feed .badge-s').count()) throw new Error('tagger must not appear on the feed');
+    step('Lab linked from Settings › About and the Games lobby; no tagger on the feed');
+    await ctx.request.post(B + '/api/posts', { multipart: { text: 'Sharpness check post' } });
+    await p.reload(); await waitHome(p);
+    const post = p.locator('#feed .post', { hasText: 'Sharpness check post' }).first();
+    await post.locator('.ai-btn').click(); await p.waitForSelector('#ai-root [data-ai-sharp]');
+    if (await p.locator('[data-ai-sharp]').inputValue() !== 'natural') throw new Error('default should be natural');
+    await p.selectOption('[data-ai-sharp]', 'sharp');
+    const n = mock.calls.length;
+    await p.fill('.ai-ask textarea', 'Explain like I am five'); await p.click('.ai-send');
+    await p.waitForFunction(() => !document.querySelector('#ai-root').classList.contains('busy') && document.querySelector('.ai-a:not(.streaming)'), null, { timeout: 15000 });
+    const c = mock.calls.slice(n).find(x => x.body && x.body.stream);
+    if (!c || c.body.temperature !== 0.455) throw new Error('sharp temperature not sent: ' + (c && c.body.temperature));
+    await p.click('[data-action=ai-close]'); await p.reload(); await waitHome(p);
+    await p.locator('#feed .post', { hasText: 'Sharpness check post' }).first().locator('.ai-btn').click(); await p.waitForSelector('#ai-root [data-ai-sharp]');
+    if (await p.locator('[data-ai-sharp]').inputValue() !== 'sharp') throw new Error('sharpness not remembered');
+    step('AI panel: Sharpness select sends base-3 temperature 0.455 and is remembered after reload');
+  } finally { await br.close(); app.child.kill(); mock.srv.close(); }
 }

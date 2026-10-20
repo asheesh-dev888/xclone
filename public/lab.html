@@ -1,0 +1,67 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Lab · ZuZu</title>
+<meta name="description" content="ZuZu AI Lab: what if e = 3? Base-3 softmax, sigmoid and growth, a live trainer, ternary weights and a tiny on-device sentiment tagger.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><meta name="theme-color" content="#000000">
+<style>
+:root{--bg:#0f1220;--card:#181c30;--fg:#e8eaf6;--mut:#9aa0c3;--e:#4fc3f7;--t:#ffb74d}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+header{padding:28px 16px 8px;text-align:center}h1{margin:0;font-size:2rem}header p{color:var(--mut);margin:6px 0}
+main{max-width:1100px;margin:auto;padding:12px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.card{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 4px 18px #0005}.wide{grid-column:1/-1}
+h2{margin:0 0 10px;font-size:1.15rem}input,select,button{background:#22274a;color:var(--fg);border:1px solid #333a66;border-radius:8px;padding:7px 9px;font-size:.95rem}
+button{cursor:pointer;background:#3949ab}button:hover{background:#5c6bc0}label{font-size:.9rem;color:var(--mut);margin-right:8px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.note{font-size:.85rem;color:var(--mut)}
+.e{color:var(--e)}.t{color:var(--t)}canvas{width:100%;background:#0b0e1a;border-radius:10px}
+.bar{height:16px;border-radius:4px;margin:2px 0}table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{padding:5px;border-bottom:1px solid #2a2f55;text-align:left}
+.cv2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+.zh{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;padding:10px 16px;background:rgba(0,0,0,.8);backdrop-filter:blur(12px);border-bottom:1px solid #2f3336}
+.zh a{color:#e7e9ea;text-decoration:none}.zh .back{font-size:22px;padding:2px 8px 2px 0}.zh .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:19px}
+.zh .logo b{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:#1d9bf0;color:#fff;font-size:18px}
+.zh .ttl{margin-left:auto;color:var(--mut);font-size:.9rem}
+.badge-s{display:inline-block;padding:5px 12px;border-radius:999px;font-weight:700;font-size:.9rem;background:#22274a}
+.badge-s.pos{background:#0d3b2a;color:#7ee2b0}.badge-s.neg{background:#4a1620;color:#ff9aa8}.badge-s.neu{background:#2a2f55;color:#c5cae9}
+.ex{font-size:.8rem;padding:4px 8px}
+main{grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))}.card{min-width:0}table{display:block;overflow-x:auto;white-space:nowrap}.row input{min-width:0;max-width:100%}.cv2{grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))}
+.tbcard{display:block;text-decoration:none;color:inherit;border:1px solid #5b4bdb;background:linear-gradient(135deg,#231d55,#181c30)}.tbcard:hover{border-color:#8f84ff}
+</style></head><body>
+<nav class="zh"><a class="back" href="/home" id="lab-back" aria-label="Back to ZuZu">←</a><a class="logo" href="/home"><b>Z</b>ZuZu</a><span class="ttl">AI Lab</span></nav>
+<header><h1>What if <span class="t">e = 3</span>?</h1><p>Exploring base-3 exponentials in ML &amp; growth · <span class="e">base e</span> vs <span class="t">base 3</span></p>
+<p class="note">This is also what the <b>Sharpness</b> option in ZuZu AI does: “Sharp (base-3)” is the same model at temperature × 0.91.</p></header>
+<main>
+<a class="card wide tbcard" href="/lab/tritbot" id="tritbot-card"><h2>💬 Chat with Trit Bot</h2><p class="note">A tiny bilingual (English · Hinglish · हिन्दी) intent chatbot whose brain is only −1, 0 and +1 weights: about 64 KB packed, 96% on 250 unseen test phrases, add/subtract-only maths, and it runs fully in your browser.</p></a>
+<section class="card"><h2>1 · Softmax explorer</h2>
+<div class="row"><label>Logits</label><input id="lg" value="2, 1, 0" style="flex:1"></div><div id="sm"></div>
+<p class="note">Base-3 softmax = standard softmax of logits × ln 3 (≈1.0986), i.e. temperature T = 1/ln 3 ≈ 0.910.</p></section>
+<section class="card"><h2>2 · Sigmoid explorer</h2><canvas id="sg" width="600" height="300"></canvas>
+<p class="note"><span class="e">1/(1+e<sup>−z</sup>)</span> vs <span class="t">1/(1+3<sup>−z</sup>)</span>, z ∈ [−6, 6]. Base-3 is just a slightly steeper sigmoid: σ(z·ln3).</p></section>
+<section class="card"><h2>3 · Growth calculator</h2>
+<div class="row"><label>A₀</label><input id="a0" type="number" value="1" style="width:80px"><label>rate r</label><input id="rr" type="number" value="1" step="0.1" style="width:70px"><label>time t</label><input id="tt" type="number" value="5" style="width:70px"></div>
+<div id="gr"></div><div class="row"><label>Target</label><input id="tg" value="8.2e9" style="width:110px"></div><div id="tsol"></div></section>
+<section class="card wide"><h2>4 · Live BaseNet-3 trainer <span class="note">(two-moons, MLP 2-50-2 ReLU, same seed &amp; LR)</span></h2>
+<div class="row"><label>Optimizer</label><select id="opt"><option value="adam">Adam</option><option value="sgd">SGD</option></select>
+<label>LR</label><input id="lr" type="number" value="0.003" step="0.001" style="width:90px"><label>Seed</label><input id="seed" type="number" value="42" style="width:70px">
+<label>Epochs</label><input id="ep" type="number" value="150" style="width:70px">
+<label><input type="checkbox" id="match"> match temperature (base-e LR × ln3)</label>
+<button id="go">Train</button><button id="stop">Stop</button></div>
+<div class="cv2"><canvas id="lc" width="600" height="260"></canvas><canvas id="ac" width="600" height="260"></canvas></div>
+<table id="res"></table>
+<div class="cv2" style="margin-top:8px"><div><p class="note e">Standard softmax (base e)</p><canvas id="dbE" width="300" height="300"></canvas></div><div><p class="note t">Base-3 softmax</p><canvas id="db3" width="300" height="300"></canvas></div></div></section>
+<section class="card wide"><h2>4b · Ternary weights {−1, 0, +1} <span class="note">(BitNet b1.58 style: latent floats, absmean scale, round-clip, straight-through estimator)</span></h2>
+<div class="row"><label>LR (Adam)</label><input id="tlr" type="number" value="0.003" step="0.001" style="width:90px"><button id="tgo">Train ternary vs FP</button></div>
+<table id="tres"></table>
+<div class="cv2" style="margin-top:8px"><div><p class="note e">Full precision (float32)</p><canvas id="dbF" width="300" height="300"></canvas></div><div><p class="note t">Ternary (1.58-bit)</p><canvas id="dbT" width="300" height="300"></canvas></div></div>
+<p class="note">Biases and the two per-layer scales γ stay float32. Size counts weights at log₂3 ≈ 1.585 bits.</p></section>
+<section class="card wide"><h2>5 · Findings (honest version)</h2><ul class="note" style="font-size:.95rem;line-height:1.55">
+<li>3<sup>x</sup> = e<sup>x·ln3</sup>. Every “base-3” network is exactly a base-e network whose logits are scaled by ln 3 ≈ 1.0986 (temperature ≈ 0.910). Nothing fundamental changes.</li>
+<li>Any small speed-up you see in the trainer comes from that ln 3 scaling: slightly sharper probabilities and an effectively larger step size. Tick <b>match temperature</b> and the base-e net gets its LR scaled to match; the gap mostly disappears (and on a different seed the order can flip).</li>
+<li>With Adam, the scale-invariance of updates makes the two nearly identical; with SGD the effect is larger but still just a learning-rate/temperature knob.</li>
+<li>Hardware: 3<sup>x</sup> is computed as exp(x·ln3), one extra multiply. It costs the same as e<sup>x</sup>; no efficiency is gained.</li>
+<li>e is “natural” because d/dx eˣ = eˣ; with base 3 every derivative picks up a ln 3 factor. Growth with base 3 is just growth at rate r·ln3.</li></ul></section>
+<section class="card wide" id="tagger"><h2>6 · Ternary on-device sentiment tagger <span class="note">(tiny demo, runs only in this page)</span></h2>
+<p class="note">A linear model over hashed words with weights in {−1, 0, +1} (same absmean round-clip + straight-through trick as 4b), trained right here in your browser on a few dozen Hinglish/English example lines. Nothing you type leaves this page.</p>
+<div class="row"><input id="tg-in" maxlength="280" placeholder="Type something… e.g. aaj ka din bahut accha tha" style="flex:1" aria-label="Text to tag"><span id="tg-badge" class="badge-s" aria-live="polite">…</span></div>
+<div class="row" id="tg-ex"></div><p class="note" id="tg-stats">Training…</p>
+<p class="note">Honest caveat: it is a toy. With a vocabulary this small it misses sarcasm, mixed feelings and most words it has never seen (those come out neutral). That’s why it lives in the Lab and not on the feed.</p></section>
+</main>
+<script src="/lab/core.js"></script><script src="/lab/lab.js"></script><script src="/lab/tagger.js"></script>
+<script src="/lab/back.js"></script></body></html>

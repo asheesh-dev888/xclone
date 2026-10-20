@@ -1,0 +1,2 @@
+// Back link: return to the previous ZuZu app page when we came from one (not from inside the Lab), otherwise go home.
+document.getElementById('lab-back').addEventListener('click', (e) => { try { const r = document.referrer && new URL(document.referrer); if (r && r.origin === location.origin && !/^\/lab(\/|$)/.test(r.pathname) && history.length > 1) { e.preventDefault(); history.back(); } } catch {} });

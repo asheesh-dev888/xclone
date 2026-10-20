@@ -69,8 +69,14 @@ function langName(lang) {
 }
 
 // Validate the request body. Returns { error } or { action, question, history, lang }.
+// Sharpness: 'natural' (base-e softmax, default) or 'sharp' (base-3: logits x ln3, i.e. temperature x 1/ln3 = x0.91).
+const BASE_TEMP = 0.5;
+const SHARPNESS = { natural: 1, sharp: 0.91 };
+const tempFor = (sharpness) => +(BASE_TEMP * (SHARPNESS[sharpness] || 1)).toFixed(3);
 function parseBody(body) {
   body = body || {};
+  const sharpness = body.sharpness == null || body.sharpness === '' ? 'natural' : String(body.sharpness);
+  if (!Object.prototype.hasOwnProperty.call(SHARPNESS, sharpness)) return { error: 'Unknown sharpness' };
   const action = body.action == null || body.action === '' ? null : String(body.action);
   const question = body.question == null ? '' : String(body.question).trim();
   if (action && !ACTIONS[action]) return { error: 'Unknown action' };
@@ -83,7 +89,7 @@ function parseBody(body) {
     history.push({ role: m.role, content: m.content.slice(0, m.role === 'user' ? 600 : 4000) });
   }
   const lang = typeof body.lang === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8}){0,3}$/.test(body.lang) ? body.lang : 'en';
-  return { action, question: action ? '' : question, history, lang };
+  return { action, question: action ? '' : question, history, lang, sharpness };
 }
 
 function buildMessages(ctx, req, nonce) {
@@ -157,7 +163,7 @@ function register(app, { auth, h, db, postIdParam }) {
     if (post && post.repost_of) post = await db.get('SELECT p.*, u.username, u.name, v.duration video_duration, v.is_reel video_is_reel FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN post_videos v ON v.post_id=p.id WHERE p.id=$1', [post.repost_of]);
     if (!post) return res.status(404).json({ error: 'Post not found' });
 
-    const cacheKey = parsed.action && CACHEABLE.has(parsed.action) && !parsed.history.length ? `${post.id}:${parsed.action}:${parsed.lang}:${parsed.style || ''}:${model()}` : null;
+    const cacheKey = parsed.action && CACHEABLE.has(parsed.action) && !parsed.history.length ? `${post.id}:${parsed.action}:${parsed.lang}:${parsed.style || ''}:${parsed.sharpness}:${model()}` : null;
     const hit = cacheKey && cacheGet(cacheKey);
     if (!hit) {
       const wait = rateCheck(req.user.id);
@@ -191,7 +197,7 @@ function register(app, { auth, h, db, postIdParam }) {
     const m = model();
     const reasoning = /gpt-oss|qwen/i.test(m);
     const payload = {
-      model: m, messages, stream: true, temperature: 0.5,
+      model: m, messages, stream: true, temperature: tempFor(parsed.sharpness),
       max_completion_tokens: MAX_TOKENS + (reasoning ? REASONING_HEADROOM : 0),
       ...(/gpt-oss/i.test(m) ? { reasoning_effort: 'low', include_reasoning: false } : /qwen/i.test(m) ? { reasoning_effort: 'none' } : {}),
     };
@@ -254,4 +260,4 @@ function register(app, { auth, h, db, postIdParam }) {
 const reasoningParams = (m) => (/gpt-oss/i.test(m) ? { reasoning_effort: 'low', include_reasoning: false } : /qwen/i.test(m) ? { reasoning_effort: 'none' } : {});
 const reasoningHeadroom = (m) => (/gpt-oss|qwen/i.test(m) ? REASONING_HEADROOM : 0);
 
-module.exports = { STYLE, enabled, model, baseUrl, register, parseBody, ACTIONS, DEFAULT_MODEL, QUESTION_MAX, REASONING_HEADROOM, reasoningParams, reasoningHeadroom };
+module.exports = { SHARPNESS, tempFor, BASE_TEMP, STYLE, enabled, model, baseUrl, register, parseBody, ACTIONS, DEFAULT_MODEL, QUESTION_MAX, REASONING_HEADROOM, reasoningParams, reasoningHeadroom };
