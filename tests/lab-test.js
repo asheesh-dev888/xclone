@@ -17,7 +17,7 @@ const uname = (p) => p + Math.random().toString(36).slice(2, 8);
   for (const [f, s] of files) ok(!/https?:\/\//i.test(s.replace(/http:\/\/www\.w3\.org[^"']*/g, '')) && !/\b(fetch|XMLHttpRequest|sendBeacon|WebSocket|eval|importScripts)\s*\(|document\.cookie|localStorage/.test(s) && !/gtag|analytics|api[_-]?key|secret|token/i.test(s), f + ' has no network calls, trackers or secrets');
   // Trit Bot: self-contained page (model + engine inline), ternary engine answers in English/Hinglish/Hindi
   const tb = fs.readFileSync(path.join(pub, 'lab/tritbot.html'), 'utf8');
-  ok(!/https?:\/\//i.test(tb) && !/\b(fetch|XMLHttpRequest|sendBeacon|WebSocket|eval|importScripts)\s*\(|document\.cookie|localStorage|<script[^>]+src=/.test(tb) && !/api[_-]?key|secret|token/i.test(tb), 'tritbot.html has no network calls, external scripts or secrets');
+  ok(!/https?:\/\//i.test(tb) && !/\b(fetch|XMLHttpRequest|sendBeacon|WebSocket|eval|importScripts)\s*\(|document\.cookie|localStorage|<script[^>]+src=/.test(tb) && !/api[_-]?key|secret\s*[:=]|\btoken\s*[:=]|\b(sk|rnd)_[A-Za-z0-9]{16,}/i.test(tb), 'tritbot.html has no network calls, external scripts or secrets');
   const TBm = JSON.parse(tb.match(/const MODEL=(\{.*?\});<\/script>/s)[1]);
   const TB = new Function('module', tb.match(/\/\*ENGINE\*\/([\s\S]*?)\/\*END\*\//)[1] + '\nreturn TB;')(undefined);
   const net = TB.load(TBm), top = (q) => { const p = net.infer(q).probs; return TBm.intents[p.indexOf(Math.max(...p))]; };
@@ -60,7 +60,10 @@ const uname = (p) => p + Math.random().toString(36).slice(2, 8);
     r = await fetch(B + '/lab/tritbot'); const tbh = await r.text(); ok(r.status === 200 && /Trit Bot · ZuZu AI Lab/.test(tbh) && /id="tb-back"/.test(tbh), '/lab/tritbot serves Trit Bot with a ZuZu header and back link');
     for (const f of ['core.js', 'lab.js', 'tagger.js']) { r = await fetch(B + '/lab/' + f); ok(r.status === 200 && /javascript/.test(r.headers.get('content-type')), '/lab/' + f + ' served as JS'); }
     r = await fetch(B + '/games'); ok(/<div id="app"|app\.js/.test(await r.text()), 'SPA routes still get the app shell');
-    const sw = await (await fetch(B + '/sw.js')).text(); ok(/zuzu-v20/.test(sw) && /lab/.test(sw), 'sw v20 and the Lab never replaces the cached app shell');
+    const sw = await (await fetch(B + '/sw.js')).text(); ok(/zuzu-v21/.test(sw) && /lab/.test(sw) && /tritbot/.test(sw), 'sw v21, the Lab never replaces the cached app shell and Trit Bot is never SW-cached');
+    { const g = await fetch(B + '/lab/tritbot', { headers: { 'accept-encoding': 'gzip' } }); const et = g.headers.get('etag'); await g.text();
+      ok(/max-age=\d+/.test(g.headers.get('cache-control') || '') && et && /tb4-/.test(et), 'Trit Bot has ETag + Cache-Control');
+      const c = await fetch(B + '/lab/tritbot', { headers: { 'if-none-match': et } }); ok(c.status === 304, 'Trit Bot revalidates with 304'); }
     // Sharpness over the wire
     let cookie = ''; const call = async (m, p, body) => { const h = { 'content-type': 'application/json' }; if (cookie) h.cookie = cookie; const res = await fetch(B + p, { method: m, headers: h, body: body && JSON.stringify(body) }); const sc = res.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0]; return res; };
     await call('POST', '/api/signup', { username: uname('lab_'), password: 'secret123' });

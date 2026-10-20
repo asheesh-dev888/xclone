@@ -790,7 +790,28 @@ app.use((err, req, res, next) => {
 
 // AI Lab: a standalone static page (not part of the SPA).
 app.get(['/lab/sbot', '/lab/sbot/'], (req, res) => res.sendFile(path.join(ROOT, 'public', 'lab', 'sbot.html')));
-app.get(['/lab/tritbot', '/lab/tritbot/'], (req, res) => res.sendFile(path.join(ROOT, 'public', 'lab', 'tritbot.html')));
+// Trit Bot v4 is one ~4.5 MB self-contained page: pre-compress it once (brotli + gzip) and serve it with a strong ETag,
+// so repeat visits are a 304 and first visits move ~1 MB instead of 4.5 MB. Not in the SW precache (and bypassed by the SW).
+const tritbot = (() => {
+  const zlib = require('zlib');
+  const fs = require('fs');
+  const raw = fs.readFileSync(path.join(ROOT, 'public', 'lab', 'tritbot.html'));
+  const etag = '"tb4-' + crypto.createHash('sha1').update(raw).digest('hex').slice(0, 20) + '"';
+  const br = zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } });
+  const gz = zlib.gzipSync(raw, { level: 9 });
+  return { raw, br, gz, etag };
+})();
+app.get(['/lab/tritbot', '/lab/tritbot/'], (req, res) => {
+  res.set({ 'Content-Type': 'text/html; charset=utf-8', ETag: tritbot.etag, 'Cache-Control': 'public, max-age=3600, must-revalidate', Vary: 'Accept-Encoding' });
+  const inm = req.headers['if-none-match'];
+  if (inm && inm.split(',').map((t) => t.trim().replace(/^W\//, '')).includes(tritbot.etag)) return res.status(304).end();
+  const ae = String(req.headers['accept-encoding'] || '');
+  let body = tritbot.raw;
+  if (/\bbr\b/.test(ae)) { body = tritbot.br; res.set('Content-Encoding', 'br'); }
+  else if (/\bgzip\b/.test(ae)) { body = tritbot.gz; res.set('Content-Encoding', 'gzip'); }
+  res.set('Content-Length', String(body.length));
+  return req.method === 'HEAD' ? res.end() : res.end(body);
+});
 app.get(['/lab', '/lab/'], (req, res) => res.sendFile(path.join(ROOT, 'public', 'lab.html')));
 app.use(express.static(path.join(ROOT, 'public'), { index: false }));
 app.get('*', (req, res) => res.sendFile(path.join(ROOT, 'public', 'index.html')));

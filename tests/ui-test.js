@@ -2058,8 +2058,8 @@ async function labUi(errors, step) {
     step('sidebar AI Lab opens the static Lab: trainers finish, ternary tagger badge tags positive/negative');
     await p.click('#tritbot-card'); await p.waitForURL(B + '/lab/tritbot'); await p.waitForSelector('#log .m.b');
     await p.fill('#q', 'ek joke sunao'); await p.press('#q', 'Enter');
-    await p.waitForFunction(() => document.querySelectorAll('#log .m.b').length >= 2 && /→ joke/.test(document.querySelector('#log .m.b:last-child .meta').textContent));
-    await p.click('.chips button >> text=कहानी सुनाओ'); await p.waitForFunction(() => /→ story/.test(document.querySelector('#log .m.b:last-child .meta')?.textContent || ''));
+    await p.waitForFunction(() => document.querySelectorAll('#log .m.b').length >= 2 && /intent: joke/.test(document.querySelector('#log .m.b:last-child .meta').textContent));
+    await p.click('.chips button >> text=कहानी सुनाओ'); await p.waitForFunction(() => /intent: story/.test(document.querySelector('#log .m.b:last-child .meta')?.textContent || ''));
     await p.click('#tb-back'); await p.waitForURL(B + '/lab'); await p.waitForSelector('#tritbot-card');
     step('Trit Bot: card on /lab opens the chatbot; English + Hindi replies with intent chips; back link returns to the Lab');
     await p.click('#lab-back'); await waitHome(p);
