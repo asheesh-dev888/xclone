@@ -16,10 +16,18 @@ function createLimiter({ max, windowMs }) {
   };
 }
 const tooMany = (res, secs, msg) => { res.set('Retry-After', String(secs)); return res.status(429).json({ error: msg }); };
-// Login: LOGIN_RATE_MAX failed attempts (default 5) per IP + username per 15 minutes. A successful login clears the counter.
+// Login: LOGIN_RATE_MAX failed attempts (default 5) per client network + username per 15 minutes. A successful login clears the counter.
 const login = createLimiter({ max: int('LOGIN_RATE_MAX', 5), windowMs: 15 * 60e3 });
 // Signup: SIGNUP_RATE_MAX attempts (default 10) per IP per hour.
 const signup = createLimiter({ max: int('SIGNUP_RATE_MAX', 10), windowMs: 3600e3 });
-const loginKey = (req, username) => req.ip + '|' + String(username || '').trim().replace(/^@/, '').toLowerCase().slice(0, 64);
+// Group the client address by network (IPv4 /24, IPv6 /64) so clients whose egress IP rotates within one
+// provider range (common with mobile carriers / NAT pools) still share a counter.
+function netOf(ip) {
+  const s = String(ip || '').replace(/^::ffff:/, '');
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(s)) return s.split('.').slice(0, 3).join('.') + '.0/24';
+  if (s.includes(':')) return s.split(':').slice(0, 4).join(':') + '::/64';
+  return s;
+}
+const loginKey = (req, username) => netOf(req.ip) + '|' + String(username || '').trim().replace(/^@/, '').toLowerCase().slice(0, 64);
 const waitMsg = (secs) => `Too many failed sign-in attempts. Please wait ${Math.max(1, Math.ceil(secs / 60))} minute${secs > 60 ? 's' : ''} and try again, or use “Forgot password?”.`;
-module.exports = { createLimiter, tooMany, login, signup, loginKey, waitMsg };
+module.exports = { createLimiter, netOf, tooMany, login, signup, loginKey, waitMsg };
