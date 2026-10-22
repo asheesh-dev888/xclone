@@ -19,6 +19,7 @@ const recovery = require('./recovery');
 const mail = require('./mail');
 const probes = require('./probes');
 const games = require('./games');
+const rl = require('./ratelimit');
 
 const PORT = parseInt(process.env.PORT || '4180', 10);
 const ROOT = __dirname;
@@ -79,6 +80,7 @@ const findUser = (name) => db.get('SELECT * FROM users WHERE lower(username)=low
 const USERNAME_RE = /^[A-Za-z0-9_.]{3,20}$/;
 const cleanUsername = (u) => String(u || '').trim().replace(/^@/, '').replace(/\s+/g, '_');
 app.post('/api/signup', h(async (req, res) => {
+  { const w = rl.signup.blocked(req.ip); if (w) return rl.tooMany(res, w, 'Too many sign-up attempts from this network. Please try again in a little while.'); rl.signup.hit(req.ip); }
   const { password = '', name = '' } = req.body || {};
   const username = cleanUsername((req.body || {}).username);
   if (!USERNAME_RE.test(username)) return res.status(400).json({ error: 'Username must be 3–20 characters: letters, numbers, _ or . (no spaces or emoji)' });
@@ -109,9 +111,13 @@ app.post('/api/signup', h(async (req, res) => {
 }));
 app.post('/api/login', h(async (req, res) => {
   const { username = '', password = '' } = req.body || {};
+  const key = rl.loginKey(req, username);
+  const wait = rl.login.blocked(key);
+  if (wait) return rl.tooMany(res, wait, rl.waitMsg(wait));
   const u = await findUser(String(username).replace(/^@/, ''));
   if (u && !u.password_hash) return res.status(401).json({ error: 'This account uses Google sign-in. Use “Continue with Google”.' });
-  if (!u || !bcrypt.compareSync(String(password), u.password_hash)) return res.status(401).json({ error: 'Wrong username or password' });
+  if (!u || !bcrypt.compareSync(String(password), u.password_hash)) { rl.login.hit(key); return res.status(401).json({ error: 'Wrong username or password' }); }
+  rl.login.reset(key);
   await startSession(res, u.id);
   res.json({ user: publicUser(u) });
 }));

@@ -736,7 +736,6 @@ function viewAuth(mode) {
       ${signup ? '' : `<div class="alt"><a href="/forgot" data-link>Forgot password?</a></div>`}
       <div class="alt">${signup ? 'Already have an account? <a href="/login" data-link>Sign in</a>' : 'Don’t have an account? <a href="/signup" data-link>Sign up</a>'}</div>
       ${authAppLink()}
-      ${signup ? '' : `<div class="demo">Demo login: <b>demo</b> / <b>demo1234</b></div>`}
     </div></div>`;
 }
 
