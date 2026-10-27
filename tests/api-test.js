@@ -1056,7 +1056,7 @@ async function videoTests() {
       r = await postVideo(B, { public_id: `zuzu/reel${i}_${rnd}` }, { reel: true, text: 'Reel number ' + i });
       reelIds.push(r.data.post.id);
     }
-    r = await anon('GET', '/api/reels'); ok(r.status === 401, 'GET /api/reels requires login');
+    r = await anon('GET', '/api/reels'); ok(r.status === 200 && Array.isArray(r.data.items), 'GET /api/reels is readable in read-only mode (no login)');
     r = await A('GET', '/api/reels?limit=2');
     const p1 = r.data;
     ok(r.status === 200 && p1.items.length === 2 && p1.items.every(x => x.video && x.video.is_reel) && p1.next_cursor === p1.items[1].id, 'GET /api/reels?limit=2 -> 2 reels + next_cursor');

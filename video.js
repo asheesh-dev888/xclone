@@ -265,14 +265,14 @@ function register(app, { auth, h, db, getPosts }) {
   }));
 
   // Reels feed, newest first: ?cursor=<last post id seen>&limit=
-  app.get('/api/reels', auth, h(async (req, res) => {
+  app.get('/api/reels', h(async (req, res) => {
     const cursor = parseInt(req.query.cursor || '0', 10) || 2 ** 31 - 1;
     const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10) || 10, 1), 30);
     const rows = await db.all(`SELECT v.post_id FROM post_videos v JOIN posts p ON p.id=v.post_id
       WHERE v.is_reel AND NOT v.is_audio AND p.parent_id IS NULL AND v.post_id < $1 ORDER BY v.post_id DESC LIMIT $2`, [cursor, limit + 1]);
     const more = rows.length > limit;
     const ids = rows.slice(0, limit).map(r => r.post_id);
-    const map = await getPosts(ids, req.user.id);
+    const map = await getPosts(ids, req.user ? req.user.id : 0);
     const items = ids.map(id => map.get(id)).filter(Boolean).map(p => ({ ...p, key: 'p' + p.id }));
     res.json({ items, next_cursor: more && ids.length ? ids[ids.length - 1] : null });
   }));

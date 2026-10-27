@@ -97,15 +97,52 @@ function appBanner() {
 // ---------- state & api ----------
 const state = { me: null, unread: 0, dmUnread: 0, chat: null, convs: [], homeTab: localStorage.getItem('homeTab') || 'following', config: { google: false, ai: false, video: false } };
 async function api(method, url, body) {
+  if (isGuest() && method !== 'GET') { guestPrompt(); const e = new Error(GUEST_MSG); e.status = 401; e.guest = true; throw e; }
   const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body instanceof FormData) opts.body = body;
   else if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const r = await fetch(url, opts);
   let data = {};
   try { data = await r.json(); } catch {}
+  if (r.status === 401 && data.guest && !state.me) guestPrompt();
   if (!r.ok) { const e = new Error(data.error || ('Request failed (' + r.status + ')')); e.status = r.status; throw e; }
   return data;
 }
+// ---------- read-only (guest) mode ----------
+// No account and no session: a localStorage flag only. The server refuses every sessionless write with 401.
+const GUEST_KEY = 'zuzu.readonly', GUEST_MSG = 'Sign up to join the conversation';
+const isGuest = () => !state.me && localStorage.getItem(GUEST_KEY) === '1';
+const GUEST_ROUTES = /^\/(explore|search|reels(\/\d+)?\/?|post\/\d+|u\/[\w.]+(\/(replies|media|reels|likes|followers|following))?)$/;
+const GUEST_ACTIONS = new Set(['back', 'close-modal', 'reel-mute', 'vmute', 'voice-play', 'momo-toggle', 'momo-sound', 'share', 'share-reel', 'copy-link',
+  'probe-toggle', 'probe-connections', 'poll-toggle', 'go', 'dismiss-app-banner', 'story-open', 'story-prev', 'story-next', 'story-close', 'guest-exit', 'guest-close']);
+function enterGuest() { try { localStorage.setItem(GUEST_KEY, '1'); } catch {} go('/explore', true); }
+function exitGuest(to) { try { localStorage.removeItem(GUEST_KEY); } catch {} closeGuestPrompt(); go(to || '/login', true); }
+const guestBanner = () => `<div class="guest-banner" role="status">👀 You’re in read-only mode, <a href="/signup" data-guest-exit>sign up to post</a> · <a href="/login" data-guest-exit>Log in</a></div>`;
+function closeGuestPrompt() { const m = document.getElementById('guest-prompt'); if (m) m.remove(); }
+function guestPrompt() {
+  if (document.getElementById('guest-prompt')) return;
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-bg guest-modal" id="guest-prompt" data-guest-bg><div class="modal guest-card" role="dialog" aria-modal="true" aria-labelledby="guest-h">
+    <h2 id="guest-h">Sign up to join the conversation</h2><p class="muted">You’re browsing in read-only mode. Create a free account to post, like, reply, follow and message.</p>
+    <div class="guest-btns"><a class="btn btn-primary" href="/signup" data-guest-exit>Sign up</a><a class="btn btn-outline" href="/login" data-guest-exit>Log in</a></div>
+    <button class="btn btn-link" data-action="guest-close">Keep browsing</button></div></div>`);
+}
+const guestView = () => `<div class="empty"><h3>Sign up to join the conversation</h3><p>This part of ZuZu needs an account. In read-only mode you can browse Explore, profiles, posts, Reels and the AI Lab.</p>
+  <div class="guest-btns"><a class="btn btn-primary" href="/signup" data-guest-exit>Sign up</a><a class="btn btn-outline" href="/login" data-guest-exit>Log in</a></div><p><a class="link" href="/explore" data-link>Back to Explore</a></p></div>`;
+document.addEventListener('click', (e) => {
+  const x = e.target.closest && e.target.closest('[data-guest-exit]');
+  if (x) { e.preventDefault(); e.stopImmediatePropagation(); return exitGuest(x.getAttribute('href')); }
+  if (e.target.closest && e.target.closest('[data-action="guest-close"]')) { e.preventDefault(); e.stopImmediatePropagation(); return closeGuestPrompt(); }
+  if (e.target.matches && e.target.matches('[data-guest-bg]')) return closeGuestPrompt();
+  if (e.target.closest && e.target.closest('[data-action="guest-enter"]')) { e.preventDefault(); e.stopImmediatePropagation(); return enterGuest(); }
+  if (!isGuest()) return;
+  const a = e.target.closest && e.target.closest('[data-action]');
+  if (a && !GUEST_ACTIONS.has(a.dataset.action)) { e.preventDefault(); e.stopImmediatePropagation(); guestPrompt(); }
+}, true);
+document.addEventListener('submit', (e) => {
+  if (!isGuest()) return;
+  const f = e.target.closest && e.target.closest('form[data-form]');
+  if (f && f.dataset.form !== 'search') { e.preventDefault(); e.stopImmediatePropagation(); guestPrompt(); }
+}, true);
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 2500);
@@ -141,7 +178,7 @@ const loader = () => `<div class="loading"><div class="spinner"></div></div>`;
 
 // ---------- router ----------
 const routes = [
-  [/^\/$/, () => go(state.me ? '/home' : '/login', true)],
+  [/^\/$/, () => go(state.me ? '/home' : isGuest() ? '/explore' : '/login', true)],
   [/^\/login$/, () => viewAuth('login')],
   [/^\/signup$/, () => viewAuth('signup')],
   [/^\/forgot$/, () => viewForgot()],
@@ -166,7 +203,12 @@ async function render() {
   closeMenus(); closeAi(); reelsTeardown(); if (window.__gameTeardown) { try { window.__gameTeardown(); } catch {} window.__gameTeardown = null; }
   $$('#app form[data-form="compose"]').forEach(f => { clearComposerVideo(f); clearVoice(f); }); // leaving the page drops an unposted upload
   const p = location.pathname;
-  if (!state.me && !PUBLIC.includes(p)) return go('/login', true);
+  if (!state.me && new URLSearchParams(location.search).get('readonly') === '1') { try { localStorage.setItem(GUEST_KEY, '1'); } catch {} history.replaceState({}, '', p === '/' || p === '/login' || p === '/signup' ? '/explore' : p); return render(); }
+  if (!state.me && isGuest() && !PUBLIC.includes(p)) {
+    if (p === '/' || p === '/home') return go('/explore', true);
+    if (!GUEST_ROUTES.test(p)) { window.scrollTo(0, 0); return shell(guestView()); }
+  } else if (!state.me && !PUBLIC.includes(p)) return go('/login', true);
+  if (!state.me && isGuest() && PUBLIC.includes(p)) { try { localStorage.removeItem(GUEST_KEY); } catch {} }
   if (state.me && PUBLIC.includes(p)) return go('/home', true);
   for (const [re, fn] of routes) { const m = p.match(re); if (m) { window.scrollTo(0, 0); return fn(m); } }
   shell(`<div class="header"><div class="header-row"><h1>Not found</h1></div></div><div class="empty"><h3>Hmm…this page doesn’t exist.</h3><p>Try searching for something else.</p><a class="btn btn-primary" href="/home" data-link>Go home</a></div>`);
@@ -183,7 +225,8 @@ function closeMenus() { $$('.dropdown,.menu').forEach(d => d.remove()); }
 
 // ---------- shell (3-column layout) ----------
 function shell(center, { active = '', layout = '' } = {}) {
-  const me = state.me;
+  const guest = !state.me;
+  const me = state.me || { username: '', name: 'Read-only mode' };
   if (layout !== 'dm') state.chat = null;
   document.body.classList.toggle('dm-page', layout === 'dm');
   document.body.classList.toggle('admin-page', layout === 'admin');
@@ -202,20 +245,21 @@ function shell(center, { active = '', layout = '' } = {}) {
       <a class="nav-item" href="/lab" data-lab>${ic('sparkle')}<span class="lbl">AI Lab</span></a>
       ${navItem('/notifications', 'notifications', 'bell', null, 'Notifications')}
       ${navItem('/messages', 'messages', 'mail', 'mailFill', 'Messages')}
-      ${navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
+      ${guest ? '' : navItem('/u/' + me.username, 'profile', 'user', 'userFill', 'Profile')}
       ${state.admin ? navItem('/admin', 'admin', 'chart', null, 'Admin') : ''}
       ${navAppLink()}
       ${momoToggleHTML(false)}
-      <button class="btn btn-primary btn-big" data-action="compose">${ic('feather')}<span class="lbl">Post</span></button>
-      <div class="me-chip" data-action="me-menu">${avatar(me)}<div class="who"><div style="font-weight:700">${esc(me.name)}</div><div style="color:var(--muted)">@${esc(me.username)}</div></div><span class="dots">${ic('dots')}</span></div>
+      ${guest ? `<a class="btn btn-primary btn-big" href="/signup" data-guest-exit><span class="lbl">Sign up</span></a><a class="btn btn-outline btn-big" href="/login" data-guest-exit><span class="lbl">Log in</span></a>` : `<button class="btn btn-primary btn-big" data-action="compose">${ic('feather')}<span class="lbl">Post</span></button>
+      <div class="me-chip" data-action="me-menu">${avatar(me)}<div class="who"><div style="font-weight:700">${esc(me.name)}</div><div style="color:var(--muted)">@${esc(me.username)}</div></div><span class="dots">${ic('dots')}</span></div>`}
     </header>
     <main class="main ${layout === 'dm' ? 'dm-main' : layout === 'admin' ? 'admin-main' : layout === 'reels' ? 'reels-main' : ''}">
       <div class="mobile-top">
-        <a href="/u/${esc(me.username)}" data-link>${avatar(me, 'sm')}</a>
+        ${guest ? `<a href="/signup" data-guest-exit class="link">Sign up</a>` : `<a href="/u/${esc(me.username)}" data-link>${avatar(me, 'sm')}</a>`}
         <a class="logo" href="/home" data-link aria-label="ZuZu home">${ic('z')}</a>
         ${state.admin ? `<a class="mobile-admin" href="/admin" data-link aria-label="Admin" title="Admin">${ic('chart')}</a>` : ''}
-        <div class="mt-right">${momoToggleHTML(true)}<a class="spacer" href="/settings" data-link aria-label="Settings" title="Settings">${ic('gear')}</a><button class="spacer" data-action="logout" aria-label="Log out" title="Log out">${ic('logout')}</button></div>
+         <div class="mt-right">${momoToggleHTML(true)}${guest ? `<a class="spacer link" href="/login" data-guest-exit>Log in</a>` : `<a class="spacer" href="/settings" data-link aria-label="Settings" title="Settings">${ic('gear')}</a><button class="spacer" data-action="logout" aria-label="Log out" title="Log out">${ic('logout')}</button>`}</div>
       </div>
+      ${guest ? guestBanner() : ''}
       <div id="center">${center}</div>
     </main>
     ${layout === 'dm' || layout === 'admin' || layout === 'reels' ? '' : `<aside class="side">
@@ -223,10 +267,10 @@ function shell(center, { active = '', layout = '' } = {}) {
       ${sideAppCard()}
       <div class="card" id="trends"><h2>What’s happening</h2>${loader()}</div>
       <div class="card" id="wtf"><h2>Who to follow</h2>${loader()}</div>
-      <div class="footer-note">ZuZu · a demo social app</div>
+      <div class="footer-note">ZuZu · a social app</div>
     </aside>`}
   </div>
-  <button class="fab" data-action="compose" aria-label="Post">${ic('feather')}</button>
+  ${guest ? '' : `<button class="fab" data-action="compose" aria-label="Post">${ic('feather')}</button>`}
   <nav class="bottom-nav">
     <a href="/home" data-link>${ic(active === 'home' ? 'homeFill' : 'home')}</a>
     <a href="/explore" data-link>${ic('search')}</a>
@@ -234,7 +278,7 @@ function shell(center, { active = '', layout = '' } = {}) {
     <a href="/games" data-link aria-label="Games" class="bn-games">${ic('games')}</a>
     <a href="/notifications" data-link aria-label="Notifications">${ic('bell')}${state.unread ? `<span class="badge">${state.unread}</span>` : ''}</a>
     <a href="/messages" data-link aria-label="Messages">${ic(active === 'messages' ? 'mailFill' : 'mail')}${dmBadge()}</a>
-    <a href="/u/${esc(me.username)}" data-link>${ic(active === 'profile' ? 'userFill' : 'user')}</a>
+    ${guest ? '' : `<a href="/u/${esc(me.username)}" data-link>${ic(active === 'profile' ? 'userFill' : 'user')}</a>`}
   </nav>`;
   loadSidebar();
 }
@@ -249,7 +293,7 @@ async function loadSidebar() {
   } catch {}
 }
 function followBtn(u) {
-  if (!state.me || u.username === state.me.username) return '';
+  if (!state.me || u.username === state.me?.username) return '';
   return u.is_following
     ? `<button class="btn btn-outline following-btn" data-action="unfollow" data-user="${esc(u.username)}"><span class="l1">Following</span><span class="l2">Unfollow</span></button>`
     : `<button class="btn btn-light" data-action="follow" data-user="${esc(u.username)}">Follow</button>`;
@@ -260,7 +304,7 @@ function userRow(u, withBio = true) {
 
 // ---------- post rendering ----------
 function postHTML(p, { thread = false } = {}) {
-  const mine = state.me && p.user_id === state.me.id;
+  const mine = state.me && p.user_id === state.me?.id;
   const inner = `
   <article class="post ${thread ? 'thread-line ancestor' : ''}" data-post="${p.id}" data-href="/post/${p.id}">
     <div class="${thread ? 'avatar-col' : ''}"><a href="/u/${esc(p.username)}" data-link>${avatar(p)}</a></div>
@@ -280,7 +324,7 @@ function postHTML(p, { thread = false } = {}) {
     </div>
   </article>`;
   if (p.reposted_by) {
-    const who = state.me && p.reposted_by.username === state.me.username ? 'You' : esc(p.reposted_by.name);
+    const who = state.me && p.reposted_by.username === state.me?.username ? 'You' : esc(p.reposted_by.name);
     return `<div class="repost-wrap" data-wrap="${p.id}"><div class="social">${ic('rt', 'icon')}<a href="/u/${esc(p.reposted_by.username)}" data-link>${who} reposted</a></div>${inner}</div>`;
   }
   return inner;
@@ -421,7 +465,7 @@ document.addEventListener('submit', async (e) => {
         if (parent) updatePostEverywhere({ ...parent, reply_count: parent.reply_count + 1 });
       } else {
         const feed = $('#feed');
-        if (feed && (location.pathname === '/home' || location.pathname === '/u/' + state.me.username)) {
+        if (feed && (location.pathname === '/home' || location.pathname === '/u/' + state.me?.username)) {
           $('.empty', feed)?.remove();
           feed.insertAdjacentHTML('afterbegin', postHTML({ ...post, key: 'p' + post.id }));
         }
@@ -523,7 +567,7 @@ document.addEventListener('click', async (e) => {
       if (location.pathname === '/u/' + name) { const fc = $('#followers-count'); if (fc) fc.textContent = user.followers; }
     } else if (a === 'me-menu') {
       if ($('.menu')) return closeMenus();
-      el.insertAdjacentHTML('beforeend', `<div class="menu"><a href="/u/${esc(state.me.username)}" data-link>View profile</a><a href="/settings" data-link>Settings</a><button data-action="logout">Log out @${esc(state.me.username)}</button></div>`);
+      el.insertAdjacentHTML('beforeend', `<div class="menu"><a href="/u/${esc(state.me?.username)}" data-link>View profile</a><a href="/settings" data-link>Settings</a><button data-action="logout">Log out @${esc(state.me?.username)}</button></div>`);
     } else if (a === 'logout') {
       await api('POST', '/api/logout'); state.me = null; go('/login', true);
     } else if (a === 'clear-video' || a === 'cancel-video') {
@@ -546,7 +590,7 @@ document.addEventListener('click', async (e) => {
       if (!user) return;
       closeModal(); $('#ideal-prompt')?.remove();
       toast(user.ideal ? 'Your ideal: ' + user.ideal.name : 'Ideal removed');
-      if (location.pathname.toLowerCase() === '/u/' + state.me.username.toLowerCase()) viewProfile(state.me.username, 'posts');
+      if (location.pathname.toLowerCase() === '/u/' + state.me?.username.toLowerCase()) viewProfile(state.me?.username, 'posts');
     }
     else if (a === 'momo-toggle') momoToggle();
     else if (a === 'momo-sound') momoSoundToggle();
@@ -590,7 +634,7 @@ const QMAP = new Map(IDEALS.QUALITIES.map(q => [q.key, q]));
 const qColor = (k) => (QMAP.get(k) || {}).color || '#71767b';
 const presetQs = (p) => [p.primary, ...(p.secondary || [])].filter(k => QMAP.has(k)).slice(0, 3);
 const IDEAL_PROMPT_KEY = 'zuzu.idealPromptDismissed';
-const idealPromptKey = () => IDEAL_PROMPT_KEY + '.' + (state.me ? state.me.id : '');
+const idealPromptKey = () => IDEAL_PROMPT_KEY + '.' + (state.me ? state.me?.id : '');
 const qChips = (keys) => keys.filter(k => QMAP.has(k)).map((k, i) => `<span class="q-chip${i ? '' : ' primary'}" style="--c:${qColor(k)}" data-q="${k}">${esc(QMAP.get(k).label)}</span>`).join('');
 function idealCard(key, name, desc, qs, selected) {
   const c = qs.length ? qColor(qs[0]) : '';
@@ -690,7 +734,7 @@ function idealBadge(i) {
 }
 const idealDot = (i) => i && i.name ? `<span class="ideal-dot" style="--c:${qColor(i.primary)}" title="Ideal: ${esc(i.name)}" aria-label="Ideal: ${esc(i.name)}"></span>` : '';
 function idealPrompt() {
-  if (!state.me || state.me.ideal || store('localStorage', idealPromptKey()) === '1') return '';
+  if (!state.me || state.me?.ideal || store('localStorage', idealPromptKey()) === '1') return '';
   const dots = IDEALS.QUALITIES.map(q => `<span style="background:${q.color}"></span>`).join('');
   return `<div class="ideal-prompt" id="ideal-prompt" role="region" aria-label="Choose your ideal"><div class="ip-dots" aria-hidden="true">${dots}</div>
     <div class="ip-body"><div class="t">Choose your ideal</div><div class="s">Who inspires you? Add a role model to your profile, coloured by the quality you admire.</div>
@@ -699,7 +743,7 @@ function idealPrompt() {
 }
 function openIdealModal({ welcome = false } = {}) {
   openModal(`<div class="modal ideal-modal"><div class="modal-head"><button class="back" data-action="close-modal" aria-label="Close">${ic('close')}</button><h2>${welcome ? 'Welcome to ZuZu!' : 'Your ideal'}</h2><button class="btn btn-light" data-action="save-ideal">Save</button></div>
-    ${idealPicker('ideal-modal-picker', state.me && state.me.ideal, { skipLabel: state.me && state.me.ideal ? 'No ideal' : 'Skip for now' })}</div>`);
+    ${idealPicker('ideal-modal-picker', state.me && state.me?.ideal, { skipLabel: state.me && state.me?.ideal ? 'No ideal' : 'Skip for now' })}</div>`);
   revealIdeal($('#ideal-modal-picker'));
 }
 async function saveIdealFrom(root) {
@@ -735,6 +779,9 @@ function viewAuth(mode) {
       </form>
       ${signup ? '' : `<div class="alt"><a href="/forgot" data-link>Forgot password?</a></div>`}
       <div class="alt">${signup ? 'Already have an account? <a href="/login" data-link>Sign in</a>' : 'Don’t have an account? <a href="/signup" data-link>Sign up</a>'}</div>
+      <div class="or"><span>or</span></div>
+      <button class="btn btn-outline btn-guest" type="button" data-action="guest-enter">👀 Browse in read-only mode</button>
+      <p class="muted guest-note">No account needed: browse posts, profiles, Reels and the AI Lab. Sign up any time to post.</p>
       ${authAppLink()}
     </div></div>`;
 }
@@ -756,7 +803,7 @@ function viewHome() {
       <button class="tab ${t === 'following' ? 'active' : ''}" data-action="home-tab" data-tab="following">Following</button>
     </div></div>
     ${appBanner()}
-    ${state.me.account && !state.me.account.has_recovery_code && !sessionStorage.getItem('zuzu.noRecBanner') ? `<div class="rec-banner"><span>🔑 Set up a recovery code so you can get back in if you forget your password.</span><a class="btn btn-outline" href="/settings#set-recovery" data-link>Set up</a><button class="x" data-action="rec-dismiss" aria-label="Dismiss">${ic('close', 'icon')}</button></div>` : ''}
+    ${state.me?.account && !state.me.account.has_recovery_code && !sessionStorage.getItem('zuzu.noRecBanner') ? `<div class="rec-banner"><span>🔑 Set up a recovery code so you can get back in if you forget your password.</span><a class="btn btn-outline" href="/settings#set-recovery" data-link>Set up</a><button class="x" data-action="rec-dismiss" aria-label="Dismiss">${ic('close', 'icon')}</button></div>` : ''}
     <div id="stories-bar" class="stories-bar"></div>
     <div id="daily-banner"></div>
     ${idealPrompt()}
@@ -765,7 +812,7 @@ function viewHome() {
   // First Google sign-in lands on /home?ideal=1: offer the picker once.
   if (new URLSearchParams(location.search).get('ideal') === '1') {
     history.replaceState({}, '', '/home');
-    if (!state.me.ideal) openIdealModal({ welcome: true });
+    if (!state.me?.ideal) openIdealModal({ welcome: true });
   }
   storiesLoad(); dailyLoad();
   loadFeed(t === 'following' ? '/api/feed/home' : '/api/feed/explore',
@@ -821,7 +868,7 @@ async function viewPost(id) {
     const { post: p, ancestors, replies } = await api('GET', '/api/posts/' + id);
     remember([p, ...ancestors, ...replies]);
     const el = $('#thread'); if (!el) return;
-    const mine = p.user_id === state.me.id;
+    const mine = p.user_id === state.me?.id;
     el.innerHTML = `${ancestors.map(a => postHTML(a, { thread: true })).join('')}
       <div class="focus" data-post="${p.id}">
         <div class="head"><a href="/u/${esc(p.username)}" data-link>${avatar(p)}</a><div class="who"><a href="/u/${esc(p.username)}" data-link><b>${esc(p.name)}</b></a>${idealDot(p.ideal)}<div style="color:var(--muted)">@${esc(p.username)}</div></div>
@@ -846,11 +893,11 @@ async function viewPost(id) {
 }
 
 async function viewProfile(username, tab) {
-  shell(`<div class="header"><div class="header-row"><button class="back" data-action="back">${ic('back')}</button><div><h1>@${esc(username)}</h1></div></div></div><div id="profile">${loader()}</div>`, { active: state.me.username.toLowerCase() === username.toLowerCase() ? 'profile' : '' });
+  shell(`<div class="header"><div class="header-row"><button class="back" data-action="back">${ic('back')}</button><div><h1>@${esc(username)}</h1></div></div></div><div id="profile">${loader()}</div>`, { active: state.me?.username.toLowerCase() === username.toLowerCase() ? 'profile' : '' });
   let u;
   try { ({ user: u } = await api('GET', '/api/users/' + username)); }
   catch (err) { $('#profile').innerHTML = `<div class="banner" style="background:#333639"></div><div class="empty"><h3>This account doesn’t exist</h3><p>Try searching for another.</p></div>`; return; }
-  const isMe = u.id === state.me.id;
+  const isMe = u.id === state.me?.id;
   if (isMe) state.me = { ...state.me, ...u };
   $('.header-row', $('.header')).innerHTML = `<button class="back" data-action="back">${ic('back')}</button><div><h1>${esc(u.name)}</h1><div class="sub">${u.posts} post${u.posts === 1 ? '' : 's'}</div></div>`;
   const tabLink = (k, l) => `<a class="tab ${tab === k ? 'active' : ''}" href="/u/${esc(u.username)}${k === 'posts' ? '' : '/' + k}" data-link>${l}</a>`;
@@ -941,7 +988,7 @@ async function viewMessages(id) {
 }
 
 function convRow(c) {
-  const lm = c.last_message, mine = lm && lm.sender_id === state.me.id;
+  const lm = c.last_message, mine = lm && lm.sender_id === state.me?.id;
   const preview = !lm ? 'No messages yet' : (mine ? 'You: ' : '') + (lm.text || (lm.has_image ? '📷 Photo' : ''));
   const active = state.chat && state.chat.id === c.id;
   return `<a class="dm-conv ${c.unread ? 'unread' : ''} ${active ? 'active' : ''}" href="/messages/${c.id}" data-link data-conv="${c.id}">
@@ -970,7 +1017,7 @@ async function dmSearch(q) {
   if (!q) { box.hidden = true; box.innerHTML = ''; return; }
   try {
     const { users } = await api('GET', '/api/search?q=' + encodeURIComponent(q));
-    const list = users.filter(u => u.id !== state.me.id).slice(0, 8);
+    const list = users.filter(u => u.id !== state.me?.id).slice(0, 8);
     if ($('form[data-form="dm-new"] input')?.value.trim().replace(/^@/, '') !== q) return;
     box.innerHTML = list.length
       ? list.map(u => `<button type="button" class="dm-result" data-action="dm-user" data-username="${esc(u.username)}">${avatar(u)}<div class="who"><div class="n">${esc(u.name)}</div><div class="h">@${esc(u.username)}</div></div></button>`).join('')
@@ -1034,7 +1081,7 @@ function addMsgs(c, list) {
   return added;
 }
 function msgHTML(c, m, prev, next, lastMineId) {
-  const mine = m.sender_id === state.me.id;
+  const mine = m.sender_id === state.me?.id;
   const end = !next || next.sender_id !== m.sender_id || next.created_at - m.created_at > 5 * 60e3 || dayLabel(next.created_at) !== dayLabel(m.created_at);
   const seen = mine && m.id === lastMineId && c.otherRead >= m.created_at;
   const day = !prev || dayLabel(prev.created_at) !== dayLabel(m.created_at) ? `<div class="dm-day">${esc(dayLabel(m.created_at))}</div>` : '';
@@ -1047,7 +1094,7 @@ function msgHTML(c, m, prev, next, lastMineId) {
 function renderChat(c, { toBottom = false, keepFromBottom = null } = {}) {
   const el = $('#dm-msgs'); if (!el || state.chat !== c) return;
   const list = [...c.msgs.values()].sort((a, b) => a.id - b.id);
-  const lastMine = list.filter(m => m.sender_id === state.me.id).pop();
+  const lastMine = list.filter(m => m.sender_id === state.me?.id).pop();
   const u = c.other;
   el.innerHTML = (c.hasMore ? `<div class="dm-older"><button class="btn btn-outline" data-action="dm-older">${c.loadingOlder ? 'Loading…' : 'Load older messages'}</button></div>` : '')
     + (list.length ? list.map((m, i) => msgHTML(c, m, list[i - 1], list[i + 1], lastMine && lastMine.id)).join('')
@@ -1092,7 +1139,7 @@ async function pollChat() {
       const el = $('#dm-msgs');
       renderChat(c, c.stick ? { toBottom: true } : { keepFromBottom: el.scrollHeight - el.scrollTop });
     }
-    if (r.messages.some(m => m.sender_id !== state.me.id)) { markRead(c); loadConversations(); }
+    if (r.messages.some(m => m.sender_id !== state.me?.id)) { markRead(c); loadConversations(); }
   } catch {} finally { c.polling = false; }
 }
 async function pollDmUnread() {
@@ -1637,7 +1684,7 @@ function openAi(id, opener) {
   aiSwipe(root);
 }
 // Sharpness (base-e vs base-3 softmax) is remembered per account on this device.
-const aiSharpKey = () => 'zuzu.ai-sharpness.' + ((state.me && state.me.username) || 'anon');
+const aiSharpKey = () => 'zuzu.ai-sharpness.' + ((state.me && state.me?.username) || 'anon');
 function aiSharp() { try { const v = localStorage.getItem(aiSharpKey()); return v === 'sharp' ? 'sharp' : 'natural'; } catch { return 'natural'; } }
 document.addEventListener('change', (e) => { const s = e.target.closest && e.target.closest('[data-ai-sharp]'); if (!s) return; try { localStorage.setItem(aiSharpKey(), s.value === 'sharp' ? 'sharp' : 'natural'); } catch {} });
 function closeAi() {
@@ -2250,7 +2297,7 @@ function gameSfx(name) {
     window.__gameSounds && window.__gameSounds.push(name); return true;
   } catch { return false; }
 }
-window.__zg = { api, shell, esc, toast, go, state, avatar, loader, sfx: gameSfx, soundOn: () => momoSoundOn(), get meName() { return state.me && state.me.username; } };
+window.__zg = { api, shell, esc, toast, go, state, avatar, loader, sfx: gameSfx, soundOn: () => momoSoundOn(), get meName() { return state.me && state.me?.username; } };
 const MOMO_MOOD_SFX = { funny: 'giggle', mindblown: 'whoa', love: 'aww', sleepy: 'yawn', cheering: 'cheer', scared: 'squeak' };
 function momoSoundToggle() {
   const on = !momoSoundOn();
@@ -2643,12 +2690,12 @@ function viewSettings() {
         <div class="field"><label>New password</label><input name="new_password" type="password" minlength="6" autocomplete="new-password" required></div>
         <p class="muted small">Other devices will be signed out.</p><button class="btn btn-outline" type="submit">Change password</button></form></section>
       <section class="set-sec" id="set-recovery"><h2>Recovery code</h2>
-        <p class="muted" id="rec-status">${state.me.account && state.me.account.has_recovery_code ? 'You have a recovery code. Generating a new one replaces it.' : 'You don’t have a recovery code yet. Make one and keep it somewhere safe.'}</p>
+        <p class="muted" id="rec-status">${state.me?.account && state.me?.account.has_recovery_code ? 'You have a recovery code. Generating a new one replaces it.' : 'You don’t have a recovery code yet. Make one and keep it somewhere safe.'}</p>
         <form data-form="regen-code" autocomplete="off"><div class="field"><label>Your password</label><input name="password" type="password" autocomplete="current-password" required></div>
-        <button class="btn btn-outline" type="submit">${state.me.account && state.me.account.has_recovery_code ? 'Generate a new code' : 'Generate my code'}</button></form></section>
+        <button class="btn btn-outline" type="submit">${state.me?.account && state.me?.account.has_recovery_code ? 'Generate a new code' : 'Generate my code'}</button></form></section>
       <section class="set-sec" id="set-email"><h2>Email</h2>
-        <p class="muted" id="email-status">${emailStatus(state.me.account)}</p>
-        <form data-form="set-email" autocomplete="off"><div class="field"><label>Email address</label><input name="email" type="email" maxlength="254" value="${esc((state.me.account && state.me.account.email) || '')}" placeholder="you@example.com"></div>
+        <p class="muted" id="email-status">${emailStatus(state.me?.account)}</p>
+        <form data-form="set-email" autocomplete="off"><div class="field"><label>Email address</label><input name="email" type="email" maxlength="254" value="${esc((state.me?.account && state.me?.account.email) || '')}" placeholder="you@example.com"></div>
         <button class="btn btn-outline" type="submit">Save email</button></form></section>
       <section class="set-sec" id="set-lang"><h2>Language</h2>
         <div class="field"><label for="set-ui-lang">App language</label><select id="set-ui-lang" data-pref="ui_lang">${[['en', 'English'], ['hi', 'हिंदी'], ['hinglish', 'Hinglish']].map(([k, l]) => `<option value="${k}"${(state.prefs?.ui_lang || ZUZU_I18N.get()) === k ? ' selected' : ''} data-noi18n>${l}</option>`).join('')}</select></div>
@@ -2849,7 +2896,7 @@ function probeHTML(p) {
   const ev = (p.evidence || []).map(u => { let host = u; try { host = new URL(u).hostname.replace(/^www\./, ''); } catch {} return `<a class="pk-link" href="${esc(safeHref(u))}" target="_blank" rel="noopener noreferrer nofollow ugc" title="${esc(u)}">🔗 ${esc(host)}</a>`; }).join('');
   let status = '';
   if (p.kind === 'prediction') {
-    const mine = state.me && p.user_id === state.me.id;
+    const mine = state.me && p.user_id === state.me?.id;
     if (p.outcome) status = `<span class="pk-out ${p.outcome === 'true' ? 'yes' : 'no'}">${p.outcome === 'true' ? '✅ Came true' : '❌ Didn’t come true'}</span>`;
     else {
       const due = p.resolve_by ? Date.now() >= p.resolve_by : false;
@@ -2918,7 +2965,7 @@ async function viewChallenge() {
     remember(d.items);
     const el = $('#challenge'); if (!el) return;
     $('#ch-day').textContent = new Date(d.day + 'T00:00:00Z').toLocaleDateString('en-IN', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
-    const mine = d.items.some(x => x.user_id === state.me.id);
+    const mine = d.items.some(x => x.user_id === state.me?.id);
     const top = d.items.filter(x => x.featured), rest = d.items.filter(x => !x.featured);
     const medal = ['🥇', '🥈', '🥉'];
     el.innerHTML = `<div class="ch-prompt"><div class="db-k">${d.today ? 'Today’s prompt' : 'Prompt'}</div><div class="ch-q">${esc(d.prompt)}</div>
@@ -3138,7 +3185,7 @@ function showRecoveryCode(code, done, { title = 'Your new recovery code' } = {})
     const k = t.dataset.rec;
     if (k === 'copy') { try { await navigator.clipboard.writeText(code); toast('Copied'); } catch { toast('Couldn’t copy. Select the code and copy it.'); } }
     else if (k === 'download') {
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([`ZuZu recovery code${state.me ? ' for @' + state.me.username : ''}\n${code}\nKeep this safe. It works once.\n`], { type: 'text/plain' }));
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([`ZuZu recovery code${state.me ? ' for @' + state.me?.username : ''}\n${code}\nKeep this safe. It works once.\n`], { type: 'text/plain' }));
       a.download = 'zuzu-recovery-code.txt'; document.body.appendChild(a); a.click(); a.remove();
     } else if (k === 'done') { el.remove(); document.body.style.overflow = ''; done && done(); }
   });

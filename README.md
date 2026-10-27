@@ -4,7 +4,7 @@ An X-style social app: Node/Express + PostgreSQL (`pg`) backend, vanilla-JS sing
 
 - Live: https://xclone-dy1g.onrender.com (Render free tier, auto-deploys from `main`)
 - Local: http://localhost:4180 (PORT env var to change)
-- Demo login: demo / demo1234 (all seeded users use demo1234)
+- Read-only mode: visitors can tap “👀 Browse in read-only mode” on the login/signup page to browse without an account (see below).
 
 ## Database
 All data lives in PostgreSQL, set via `DATABASE_URL` (required). SSL is used automatically
@@ -252,8 +252,16 @@ poster, is_reel; added idempotently in `schema.sql`).
     node tests/monkey-demo.js # record screenshots/monkey-demo.gif + .mp4 (Momo hopping while scrolling; mock Groq on :4205;
                               #  needs `npx playwright-core install ffmpeg` once, plus system ffmpeg)
     # Run tests with `env -u DATABASE_URL` so only the local DB from .env.local is used.
-    node tests/shots.js       # regenerate screenshots/ (logs in as demo; opening DMs marks them read)
+    node tests/shots.js       # regenerate screenshots/ (logs in as a seeded account; opening DMs marks them read)
 
 ## Files
 server.js (API + static), video.js (Cloudinary video + Reels), ai.js (ZuZu AI), monkey.js (Momo's thoughts), admin.js (admin dashboard API + /admin access), ideals.js (ideal validation/output), db.js (pg pool, schema init, first-run seed), schema.sql, seed.js,
 public/{index.html,style.css,app.js,ideals.js,favicon.svg,sw.js,download/ZuZu.apk}, bin/cloudflared, screenshots/.
+
+## Read-only mode (guest browsing)
+No shared account and no password: the client sets `localStorage['zuzu.readonly']='1'` (or opens any URL with `?readonly=1`) and
+browses without a session. Guests can open Explore, search, posts, profiles (+ followers/following), Reels and the AI Lab (`/lab`).
+Server-side, every non-GET `/api/*` request without a session returns `401 {"error":"Sign up to join the conversation","guest":true}`
+(except signup/login/logout, password recovery and token-checked admin endpoints). Guest GETs are rate-limited per client
+network (`GUEST_READ_RATE_MAX`, default 300/min, 429 + Retry-After). `GET /api/reels` no longer requires login; DMs,
+notifications, settings, email/account, games and admin stay login-only. Tests: `node tests/guest-test.js`.

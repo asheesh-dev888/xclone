@@ -2,7 +2,7 @@
 // Never caches API (including direct messages under /api/dm, ZuZu AI answers under /api/ai, Momo's thoughts under /api/monkey,
 // admin stats under /api/admin and video upload signing under /api/video), the /admin page, auth, media uploads, app downloads
 // (/download), videos (Cloudinary URLs, <video> and Range requests) or non-GET requests.
-const CACHE = 'zuzu-v21';
+const CACHE = 'zuzu-v22';
 // Paths that always go straight to the network and are never cached.
 const BYPASS = /^\/(api|admin|auth|media|download|healthz|\.well-known)(\/|$)/;
 const SHELL = ['/', '/style.css', '/app.js', '/games.js', '/ideals.js', '/i18n.js', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
@@ -30,7 +30,7 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/api/ai')) return; // ZuZu AI answers are streamed + per user: never cached (also covered by BYPASS)
   if (url.pathname.startsWith('/api/video') || url.pathname.startsWith('/api/reels')) return; // video signing + reels feed: never cached (also covered by BYPASS)
   if (url.pathname.startsWith('/api/monkey')) return; // Momo's thoughts: never cached by the SW (the app caches them per post itself; also covered by BYPASS)
-  if (/^\/lab\/tritbot\/?$/.test(url.pathname)) return; // Trit Bot v4 is ~4.5 MB: never cached by the SW (the server sends ETag + Cache-Control)
+  if (/^\/lab\/(tritbot|reasoner)(\.html)?\/?$/.test(url.pathname)) return; // Trit Bot v4 / Trit Reasoner are ~4.5 MB: never cached by the SW (the server sends ETag + Cache-Control)
   const isPage = req.mode === 'navigate' && !/^\/lab(\/|\.html|$)/.test(url.pathname); // the AI Lab is its own page, never the app shell
   e.respondWith(
     fetch(req).then((res) => {

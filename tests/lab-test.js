@@ -60,7 +60,7 @@ const uname = (p) => p + Math.random().toString(36).slice(2, 8);
     r = await fetch(B + '/lab/tritbot'); const tbh = await r.text(); ok(r.status === 200 && /Trit Bot · ZuZu AI Lab/.test(tbh) && /id="tb-back"/.test(tbh), '/lab/tritbot serves Trit Bot with a ZuZu header and back link');
     for (const f of ['core.js', 'lab.js', 'tagger.js']) { r = await fetch(B + '/lab/' + f); ok(r.status === 200 && /javascript/.test(r.headers.get('content-type')), '/lab/' + f + ' served as JS'); }
     r = await fetch(B + '/games'); ok(/<div id="app"|app\.js/.test(await r.text()), 'SPA routes still get the app shell');
-    const sw = await (await fetch(B + '/sw.js')).text(); ok(/zuzu-v21/.test(sw) && /lab/.test(sw) && /tritbot/.test(sw), 'sw v21, the Lab never replaces the cached app shell and Trit Bot is never SW-cached');
+    const sw = await (await fetch(B + '/sw.js')).text(); ok(/zuzu-v22/.test(sw) && /lab/.test(sw) && /tritbot/.test(sw) && /reasoner/.test(sw), 'sw v22, the Lab never replaces the cached app shell and Trit Bot + Trit Reasoner are never SW-cached');
     { const g = await fetch(B + '/lab/tritbot', { headers: { 'accept-encoding': 'gzip' } }); const et = g.headers.get('etag'); await g.text();
       ok(/max-age=\d+/.test(g.headers.get('cache-control') || '') && et && /tb4-/.test(et), 'Trit Bot has ETag + Cache-Control');
       const c = await fetch(B + '/lab/tritbot', { headers: { 'if-none-match': et } }); ok(c.status === 304, 'Trit Bot revalidates with 304'); }

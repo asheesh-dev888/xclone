@@ -204,8 +204,6 @@ svg{fill:currentColor}
 .auth .err{color:var(--red);margin-top:10px;min-height:20px}
 .auth .alt{margin-top:28px;color:var(--muted)}
 .auth .alt a{color:var(--blue)}
-.auth .demo{margin-top:20px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;color:var(--muted);font-size:14px;line-height:1.5}
-.auth .demo b{color:var(--text)}
 .fab{display:none}
 .bottom-nav{display:none}
 /* Android app download */
@@ -1113,3 +1111,12 @@ body.royale-on{overflow:hidden}
 .rr-trophy{font-size:54px}.rr-card h2{margin:4px 0}.rr-place{font-size:44px;font-weight:900;color:#ffd43b}.rr-place small{font-size:16px;color:var(--muted)}
 .rr-stats{display:flex;justify-content:center;gap:14px;margin:10px 0;font-size:14px}
 .gm-card.lab{background:linear-gradient(135deg,rgba(255,183,77,.16),rgba(79,195,247,.10))}
+
+/* read-only (guest) mode */
+.btn-guest{width:100%}
+.guest-note{font-size:13px;margin:8px 0 0}
+.guest-banner{position:sticky;top:0;z-index:5;padding:8px 16px;background:var(--bg,#000);border-bottom:1px solid var(--border);color:var(--muted);font-size:14px;text-align:center}
+.guest-banner a{color:var(--blue,#1d9bf0);font-weight:700}
+.guest-btns{display:flex;gap:10px;justify-content:center;margin:14px 0}
+.guest-card{max-width:400px;padding:24px;text-align:center}
+.guest-modal{display:flex;align-items:center;justify-content:center}
